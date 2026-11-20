@@ -1,0 +1,32 @@
+{
+  "interface": "gui",
+  "reboot": false,
+  "features": {
+    "base_tools": "N",
+    "dev_tools": "N",
+    "desktop_tools": "N",
+    "gedit": "N",
+    "media_tools": "N",
+    "virtualization_tools": "N",
+    "language_input": "Y",
+    "time_sync": "Y",
+    "gpu_driver": "N",
+    "cuda": "N",
+    "ros": "N",
+    "rosdep": "Y",
+    "v2rayn": "Y",
+    "chrome": "Y",
+    "steam": "Y",
+    "edge": "N",
+    "vscode": "N",
+    "qq": "Y",
+    "wechat": "Y",
+    "typora": "N",
+    "anaconda": "Y",
+    "spark_store": "N",
+    "hikcamera": "N",
+    "system_upgrade": "N",
+    "storage_tools": "Y"
+  },
+  "input_method": "auto"
+}
