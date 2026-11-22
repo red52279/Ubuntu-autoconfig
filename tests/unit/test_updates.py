@@ -1,0 +1,95 @@
+import io
+import json
+from pathlib import Path
+import sys
+import tarfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+from run_files import temporary_directory
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts/lib'))
+import archive_apps
+import updates
+
+
+class ArchiveTests(unittest.TestCase):
+    def test_clion_installs_matching_original_archive_and_preserves_previous_on_error(self):
+        with temporary_directory() as directory:
+            root = Path(directory)
+            archive = root / 'CLion-2026.3.1.tar.gz'
+            product = dict(productCode='CL', version='2026.3.1', launch=[dict(os='Linux', arch='x86_64')])
+            with tarfile.open(archive, 'w:gz') as tar:
+                for name, data in (('product-info.json', json.dumps(product)), ('bin/clion.sh', '#!/bin/sh\n')):
+                    entry = tarfile.TarInfo('clion/' + name)
+                    entry.size = len(data)
+                    entry.mode = 0o755
+                    tar.addfile(entry, io.BytesIO(data.encode()))
+            installed = root / 'opt-clion'
+            archive_apps.install_clion('amd64', installed, root)
+            self.assertEqual(archive_apps.clion_version(installed), '2026.3.1')
+            archive.rename(root / 'CLion-2026.3.2.tar.gz')
+            with self.assertRaisesRegex(ValueError, '版本'):
+                archive_apps.install_clion('amd64', installed, root)
+            self.assertEqual(archive_apps.clion_version(installed), '2026.3.1')
+
+    def test_v2rayn_removes_only_the_installers_duplicate_launcher(self):
+        with temporary_directory() as directory:
+            root = Path(directory)
+            native = root / 'v2rayN.desktop'
+            managed = root / 'v2rayn.desktop'
+            native.write_text('[Desktop Entry]\nExec=/opt/v2rayN/v2rayN\n')
+            managed.write_text(archive_apps.V2RAYN_DESKTOP)
+            with patch.object(archive_apps.shutil, 'which', side_effect=lambda file: file):
+                self.assertFalse(archive_apps.v2rayn_desktop_ready(root))
+                archive_apps.configure_v2rayn_desktop(root)
+                self.assertTrue(archive_apps.v2rayn_desktop_ready(root))
+                self.assertFalse(managed.exists())
+                self.assertTrue(native.is_file())
+                managed.write_text('[Desktop Entry]\nName=Custom\nExec=/opt/v2rayN/v2rayN\n')
+                archive_apps.configure_v2rayn_desktop(root)
+                self.assertIn('Name=Custom', managed.read_text())
+
+
+class VersionTests(unittest.TestCase):
+    def test_update_sources_keep_domestic_stanzas_and_skip_foreign_stanzas(self):
+        domestic = 'Types: deb\nURIs: https://mirrors.aliyun.com/ubuntu\nSuites: noble\nComponents: main\n'
+        foreign = 'Types: deb\nURIs: https://packages.microsoft.com/repos/code\nSuites: stable\nComponents: main\n'
+        self.assertEqual(updates.approved_source_text(domestic + '\n' + foreign, deb822=True),
+                         (domestic + '\n', True))
+        lines = 'deb https://packages.microsoft.com/repos/code stable main\n'
+        lines += 'deb https://mirrors.aliyun.com/ubuntu noble main\n'
+        self.assertEqual(updates.approved_source_text(lines), (lines.splitlines(keepends=True)[1], True))
+
+    def test_candidates_compare_versions_and_include_multiarch_packages(self):
+        installed = {'libexample:amd64': '1', 'steam-libs:i386': '2'}
+        simulation = 'Inst libexample [1] (2 Debian [amd64])\nInst steam-libs:i386 [2] (3 Ubuntu [i386])'
+        self.assertEqual(updates.planned_installs(simulation, installed, 'amd64'),
+                         {'libexample:amd64': '2', 'steam-libs:i386': '3'})
+        self.assertEqual(updates.installed_targets('steam', installed, 'noble'), {'steam-libs:i386'})
+
+    def test_rollback_refuses_solver_changes_outside_the_record(self):
+        receipt = SimpleNamespace(data={'version_update': True, 'packages_before': {'gedit': '1'},
+                                        'packages_after': {'gedit': '2'}},
+                                  plan=lambda _: {'restore_files': [], 'preserve_modified_files': [],
+                                                  'preserve_runtime_changes': []})
+        with temporary_directory() as work, patch.object(updates, 'packages', return_value={'gedit': '2'}), \
+                patch.object(updates, 'apt', return_value='Inst other (5 Ubuntu [amd64])'), \
+                patch.object(updates, 'apt_apply') as apply:
+            with self.assertRaisesRegex(ValueError, '计划外'):
+                updates.rollback_versions(receipt, True, Path(work), 'amd64')
+            apply.assert_not_called()
+
+    def test_rollback_uses_recorded_versions_and_verifies_result(self):
+        receipt = SimpleNamespace(data={'version_update': True, 'packages_before': {'gedit': '1'},
+                                        'packages_after': {'gedit': '2'}},
+                                  plan=lambda _: {'restore_files': [], 'preserve_modified_files': [],
+                                                  'preserve_runtime_changes': []}, finish=lambda _: None)
+        with temporary_directory() as work, \
+                patch.object(updates, 'packages', side_effect=[{'gedit': '2'}, {'gedit': '1'}]), \
+                patch.object(updates, 'apt', return_value='Inst gedit [2] (1 Ubuntu [amd64])') as apt, \
+                patch.object(updates, 'apt_apply') as apply:
+            updates.rollback_versions(receipt, True, Path(work), 'amd64')
+            self.assertIn('gedit=1', apt.call_args.args)
+            self.assertIn('gedit=1', apply.call_args.args[0])

@@ -28,6 +28,16 @@ cleanup_run_temp() {
     fi
 }
 
+setup_download_cache() {
+    local state=$1
+    export AUTOCONFIG_CACHE_DIR="$state/runs/cache"
+    if [[ -d "$state/cache" && ! -L "$state/cache" &&
+          ! -e "$AUTOCONFIG_CACHE_DIR" && ! -L "$AUTOCONFIG_CACHE_DIR" ]]; then
+        mv -T -- "$state/cache" "$AUTOCONFIG_CACHE_DIR" ||
+            warn "旧缓存无法迁移，将使用 $AUTOCONFIG_CACHE_DIR。"
+    fi
+}
+
 network_tool() {
     local command=(python3 "$NETWORK_HELPER")
     if [[ -n ${DOWNLOAD_TIMEOUT:-} ]]; then
@@ -69,8 +79,15 @@ select_domestic_mirror() {
 }
 
 apt_get() {
-    network_tool audit-apt || return $?
-    local host proxy_options=() deadline=()
+    local host proxy_options=() deadline=() source_options=()
+    if [[ -n ${AUTOCONFIG_APT_SOURCES_DIR:-} ]]; then
+        local sources=$AUTOCONFIG_APT_SOURCES_DIR
+        network_tool audit-apt "$sources/sources.list" "$sources/sources.list.d/"*.list "$sources/sources.list.d/"*.sources || return $?
+        source_options=(-o "Dir::Etc::sourcelist=$sources/sources.list"
+                        -o "Dir::Etc::sourceparts=$sources/sources.list.d" -o APT::Get::List-Cleanup=false)
+    else
+        network_tool audit-apt || return $?
+    fi
     for host in mirrors.tuna.tsinghua.edu.cn mirrors.ustc.edu.cn mirrors.nju.edu.cn mirrors.aliyun.com \
         mirrors.huaweicloud.com typoraio.cn downloads.typoraio.cn; do
         proxy_options+=(-o "Acquire::http::Proxy::$host=DIRECT" -o "Acquire::https::Proxy::$host=DIRECT")
@@ -82,7 +99,7 @@ apt_get() {
         -o Acquire::http::Proxy-Auto-Detect= -o Acquire::https::Proxy-Auto-Detect= \
         -o Acquire::http::AllowRedirect=false -o Acquire::https::AllowRedirect=false \
         -o Acquire::Retries=2 -o Acquire::http::Timeout=25 -o Acquire::https::Timeout=25 \
-        -o DPkg::Lock::Timeout=120 "${proxy_options[@]}" "$@"
+        -o DPkg::Lock::Timeout=120 "${proxy_options[@]}" "${source_options[@]}" "$@"
 }
 
 say()  { printf '\033[1;34m[autoconfig]\033[0m %s\n' "$*"; }

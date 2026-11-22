@@ -26,6 +26,7 @@ ALLOWED_HOSTS = {
     'typoraio.cn', 'downloads.typoraio.cn',
 }
 PUBLISHER_PATHS = {
+    'www.jetbrains.com.cn': ('/clion/download',),
     'gitee.com': ('/api/v5/repos/spark-store-project/spark-store/releases',
                   '/spark-store-project/spark-store/releases/download',
                   '/spark-store-project/spark-store/raw/master/tool/spark-store.asc'),

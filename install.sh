@@ -184,11 +184,10 @@ setup_run_temp "$RUNS_DIR"
 LOG_FILE="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S)-$$.log"
 SUCCESS_LOG="$STATE_DIR/success.log"
 ERROR_LOG="$STATE_DIR/error.log"
-export AUTOCONFIG_CACHE_DIR="$RUNS_DIR/cache"
-if (( ! DRY_RUN )) && [[ -d "$STATE_DIR/cache" && ! -L "$STATE_DIR/cache" &&
-                         ! -e "$AUTOCONFIG_CACHE_DIR" && ! -L "$AUTOCONFIG_CACHE_DIR" ]]; then
-    mv -T -- "$STATE_DIR/cache" "$AUTOCONFIG_CACHE_DIR" ||
-        warn "旧缓存无法迁移，将使用 $AUTOCONFIG_CACHE_DIR。"
+if (( DRY_RUN )); then
+    export AUTOCONFIG_CACHE_DIR="$RUNS_DIR/cache"
+else
+    setup_download_cache "$STATE_DIR"
 fi
 export CLEAN_REINSTALL
 SUMMARY_EVENTS="${LOG_FILE%.log}.events.jsonl"

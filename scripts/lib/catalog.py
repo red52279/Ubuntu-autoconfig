@@ -19,6 +19,7 @@ FEATURES = {
     'dev_tools': feature('CMake / OpenCV / Eigen 开发库', ('cmake','ninja-build','gcc','g++','make','libssl-dev','libeigen3-dev','libopencv-dev','libzbar-dev','libaravis-dev')),
     'desktop_tools': feature('Qt6 / Qt Creator', ('qt6-base-dev','qt6-tools-dev-tools','qtcreator'), suites=('jammy','noble','resolute'), reason='该发行版的 Ubuntu 源不提供本模块需要的 Qt6'),
     'gedit': feature('gedit 文本编辑器', ('gedit',)),
+    'clion': feature('JetBrains CLion（非商业免费）', arches=('amd64','arm64'), kind='clion'),
     'media_tools': feature('压缩与归档工具', ('zip','unzip','unrar','tree')),
     'virtualization_tools': feature('Wine Windows 兼容环境', ('wine',), arches=('amd64',), clean=('wine',), reason='本脚本的 Wine 流程仅适用于 amd64，不提供 ARM 上的 x86 转译'),
     'language_input': feature('系统中文输入法与中文语言', kind='input'),

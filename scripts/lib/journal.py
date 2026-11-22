@@ -37,6 +37,7 @@ PATHS = {
     'spark_store': ['/etc/apt/sources.list.d/sparkstore.list', '/etc/apt/trusted.gpg.d/spark-store.gpg'],
     'hikcamera': ['/opt/MVS', '/usr/share/applications/MVS.desktop',
                   '/etc/udev/rules.d/70-ubuntu-autoconfig-mvs.rules'],
+    'clion': ['/opt/clion', '/usr/share/applications/jetbrains-clion.desktop'],
 }
 
 
@@ -180,7 +181,7 @@ class Journal:
                            '.config/autostart/user-dirs-update-gtk.desktop'):
                 self.capture(home / suffix)
                 touched.append(str(home / suffix))
-        if feature == 'anaconda' and not Path('/opt/anaconda3').exists():
+        if feature == 'anaconda' and (self.data.get('version_update') or not Path('/opt/anaconda3').exists()):
             self.capture('/opt/anaconda3')
             touched.append('/opt/anaconda3')
         self.data['active'] = feature
@@ -351,7 +352,10 @@ def main():
     elif args.action == 'prepare': journal.prepare(args.feature)
     elif args.action == 'checkpoint': journal.checkpoint(args.feature, args.result)
     elif args.action == 'finish': journal.finish(args.result)
-    elif args.action == 'rollback': journal.rollback(args.yes)
+    elif args.action == 'rollback':
+        if journal.data.get('version_update'):
+            raise SystemExit('这是版本更新记录，请用 manage.sh rollback-version --run 指定该记录。')
+        journal.rollback(args.yes)
     else: print(json.dumps(journal.data, ensure_ascii=False, indent=2))
 
 

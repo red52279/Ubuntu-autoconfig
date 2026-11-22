@@ -6,7 +6,9 @@ RUNS_DIR=$STATE/runs
 ACTION=${1:-status}
 (($# == 0)) || shift
 usage() {
-    printf '用法: ./manage.sh {status|logs|summary [--json]|retry [--background]|stop|rollback [--run ID] [--yes|--dry-run]|cleanup}\n'
+    printf '%s\n' '用法: ./manage.sh {status|logs|summary [--json]|retry [--background]|stop|cleanup}' \
+        '      ./manage.sh {check-updates|update} [--only 功能列表] [--dry-run]' \
+        '      ./manage.sh {rollback|rollback-version} [--run ID] [--yes|--dry-run]'
 }
 if [[ "$ACTION" == --help || "$ACTION" == -h ]]; then usage; exit 0; fi
 for argument in "$@"; do
@@ -30,6 +32,7 @@ case "$ACTION" in
         if [[ -f "$STATE/state" ]]; then printf '\n完成步骤记录:\n'; cat "$STATE/state"; fi
         if [[ -f "$STATE/failed-step" ]]; then printf '\n待重试步骤: '; cat "$STATE/failed-step"; fi
         if [[ -f "$STATE/latest-run" ]]; then printf '\n最近回滚记录: '; cat "$STATE/latest-run"; fi
+        if [[ -f "$STATE/latest-version-run" ]]; then printf '\n最近版本更新记录: '; cat "$STATE/latest-version-run"; fi
         exit 0 ;;
     logs) exec tail -n 100 -F /var/log/ubuntu-autoconfig/latest.log ;;
     retry)
@@ -44,13 +47,23 @@ case "$ACTION" in
         done
         printf '后台安装/测试任务已停止。\n'
         exit 0 ;;
-    rollback|uninstall|cleanup) ;;
+    rollback|uninstall|cleanup|check-updates|update|rollback-version) ;;
     *) usage; exit 2 ;;
 esac
 if (( EUID != 0 )); then exec sudo bash "$0" "$ACTION" "$@"; fi
 mkdir -p "$STATE"
 exec 9>"$STATE/install.lock"
 flock -n 9 || { printf '安装任务仍在运行，请先 ./manage.sh stop。\n' >&2; exit 1; }
+if [[ "$ACTION" == check-updates || "$ACTION" == update || "$ACTION" == rollback-version ]]; then
+    source "$ROOT_DIR/scripts/lib/common.sh"
+    install -d -m 0755 "$RUNS_DIR"
+    RUN_TEMP_DIR=
+    trap cleanup_run_temp EXIT
+    setup_run_temp "$RUNS_DIR"
+    setup_download_cache "$STATE"
+    /usr/bin/python3 "$ROOT_DIR/scripts/lib/updates.py" "$ACTION" "$@"
+    exit 0
+fi
 if [[ "$ACTION" == cleanup ]]; then
     python3 - "$RUNS_DIR/cache" "$STATE/cache" <<'PY'
 from pathlib import Path

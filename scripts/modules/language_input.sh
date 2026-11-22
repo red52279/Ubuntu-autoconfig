@@ -89,6 +89,15 @@ if url.startswith('https://ime-sec.gtimg.com/'):
 PY
 }
 
+fetch_sogou_deb() {
+    local output=$1 response
+    local urls=()
+    tmp_download https://shurufa.sogou.com/linux "${output%/*}/sogou.html"
+    response=$(sogou_download_urls "${output%/*}/sogou.html") || return $?
+    mapfile -t urls <<< "$response"
+    download_from_mirrors "$output" "${urls[@]}"
+}
+
 install_sogou_input() (
     set -Eeuo pipefail
     if [[ "$ARCH" != amd64 && "$ARCH" != arm64 ]]; then
@@ -109,11 +118,7 @@ install_sogou_input() (
         say "搜狗包已安装，只检查依赖和配置。"
         apt_install "${requirements[@]}"
     else
-    tmp_download https://shurufa.sogou.com/linux "$tmp_dir/sogou.html"
-    local urls_text urls=()
-    urls_text=$(sogou_download_urls "$tmp_dir/sogou.html")
-    mapfile -t urls <<< "$urls_text"
-    download_from_mirrors "$tmp_dir/sogoupinyin.deb" "${urls[@]}"
+    fetch_sogou_deb "$tmp_dir/sogoupinyin.deb"
     [[ $(dpkg-deb -f "$tmp_dir/sogoupinyin.deb" Package) == sogoupinyin ]] || die "搜狗下载包名不匹配。"
     [[ $(dpkg-deb -f "$tmp_dir/sogoupinyin.deb" Architecture) == "$ARCH" ]] || die "搜狗下载包架构不匹配。"
     chmod 0755 "$tmp_dir"

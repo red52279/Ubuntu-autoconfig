@@ -106,16 +106,14 @@ install_checked_deb() {
     apt_install "$file"
 }
 
-install_vendor_deb() (
-    local package=$1 file="$SCRIPT_DIR/packages.local/${1}_${ARCH}.deb" tmp_dir release url digest
+fetch_vendor_deb() (
+    local package=$1 output=$2 file="$SCRIPT_DIR/packages.local/${1}_${ARCH}.deb" tmp_dir release url digest
     tmp_dir=$(mktemp -d)
     trap 'rm -rf -- "$tmp_dir"' EXIT
     if [[ -f "$file" ]]; then
-        cp -- "$file" "$tmp_dir/package.deb"
-        install_checked_deb "$tmp_dir/package.deb" "$package"
+        cp -- "$file" "$output"
         return
     fi
-    apt_install ca-certificates gnupg gpgv
     local base="https://mirrors.sdu.edu.cn/spark-store/$ARCH-store"
     install_signing_key "$tmp_dir/spark.gpg" 9D9AA859F75024B1A1ECE16E0E41D354A29A440C \
         https://gitee.com/spark-store-project/spark-store/raw/master/tool/spark-store.asc
@@ -125,9 +123,26 @@ install_vendor_deb() (
     release=$(/usr/bin/python3 "${NETWORK_HELPER%/*}/vendor_release.py" spark-archive "$ARCH" \
         --package "$package" --release "$tmp_dir/Release" --index "$tmp_dir/Packages")
     IFS=$'\t' read -r url digest <<< "$release"
-    DOWNLOAD_TIMEOUT=300 EXPECTED_DEB_PACKAGE="$package" EXPECTED_DEB_SHA256="$digest" install_downloaded_deb "$url"
+    DOWNLOAD_TIMEOUT=300 download_from_mirrors "$output" "$url"
+    printf '%s  %s\n' "$digest" "$output" | sha256sum --check --status
 )
 
+install_vendor_deb() (
+    local package=$1 tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf -- "$tmp_dir"' EXIT
+    apt_install ca-certificates gnupg gpgv
+    fetch_vendor_deb "$package" "$tmp_dir/package.deb"
+    install_checked_deb "$tmp_dir/package.deb" "$package"
+)
+
+qq_release_url() {
+    if [[ -n ${QQ_OFFICIAL_URL:-} ]]; then
+        printf '%s\n' "$QQ_OFFICIAL_URL"
+    else
+        python3 "${NETWORK_HELPER%/*}/qq.py" --arch "$ARCH"
+    fi
+}
 
 install_qq() (
     set -Eeuo pipefail
@@ -144,14 +159,19 @@ install_qq() (
         return 0
     fi
     apt_install curl ca-certificates python3
-    local url=${QQ_OFFICIAL_URL:-} tmp_dir
-    tmp_dir=$(mktemp -d)
-    trap 'rm -rf -- "$tmp_dir"' EXIT
-    if [[ -z "$url" ]]; then
-        url=$(python3 "${NETWORK_HELPER%/*}/qq.py" --arch "$ARCH")
-    fi
-    install_downloaded_deb "$url"
+    local url
+    url=$(qq_release_url)
+    EXPECTED_DEB_PACKAGE=linuxqq install_downloaded_deb "$url"
 )
+
+wechat_release_urls() {
+    if [[ -n ${WECHAT_OFFICIAL_URL:-} ]]; then
+        printf '%s\n' "$WECHAT_OFFICIAL_URL"
+    else
+        printf '%s\n' https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb \
+            https://dldir1.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb
+    fi
+}
 
 install_wechat() {
     if [[ "$ARCH" != amd64 ]]; then
@@ -165,16 +185,13 @@ install_wechat() {
     apt_install curl ca-certificates
     # Official Tencent mainland download endpoint. Override this when Tencent
     # publishes a newer filename through WECHAT_OFFICIAL_URL.
-    local url="${WECHAT_OFFICIAL_URL:-https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb}"
     if (( DRY_RUN )); then
-        say "从腾讯官方国内地址下载微信并安装（不保留安装包）: $url"
+        say "从腾讯官方国内地址下载微信并安装"
         return 0
     fi
-    if [[ -n "${WECHAT_OFFICIAL_URL:-}" ]]; then
-        install_downloaded_deb "$url"
-    else
-        install_downloaded_deb "$url" https://dldir1.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb
-    fi
+    local urls=()
+    mapfile -t urls < <(wechat_release_urls)
+    EXPECTED_DEB_PACKAGE=wechat install_downloaded_deb "${urls[@]}"
 }
 
 install_typora() {
@@ -240,7 +257,7 @@ install_anaconda() (
         urls=("${ANACONDA_MIRROR_BASE_URL%/}/$filename" "${urls[@]}")
     fi
     install_path=/opt/anaconda3
-    if [[ -x "$install_path/bin/conda" && -x "$install_path/bin/python" ]] && \
+    if (( ! ${UPDATE_ARCHIVE:-0} )) && [[ -x "$install_path/bin/conda" && -x "$install_path/bin/python" ]] && \
         env -u PYTHONPATH -u PYTHONHOME "$install_path/bin/python" -c 'import conda, numpy, pandas' >/dev/null 2>&1; then
         configure_anaconda_channels
         say "Anaconda 已安装，跳过。"
@@ -265,6 +282,7 @@ install_anaconda() (
         CONDA_REGISTER_ENVS=false bash "$tmp_dir/installer.sh" -b -u -p "$install_path"
     [[ -x "$install_path/bin/conda" ]] || die "Anaconda 安装器未生成 conda。"
     env -u PYTHONPATH -u PYTHONHOME "$install_path/bin/python" -c 'import conda, numpy, pandas'
+    printf '%s\n' "$version" | as_root tee "$install_path/.ubuntu-autoconfig-version" >/dev/null
     configure_anaconda_channels
 )
 

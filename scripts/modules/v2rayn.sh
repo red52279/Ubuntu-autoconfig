@@ -6,16 +6,7 @@ v2rayn_existing_binary() {
 }
 
 v2rayn_desktop_entry() {
-    as_root install -d -m 0755 /usr/share/applications
-    as_root tee /usr/share/applications/v2rayn.desktop >/dev/null <<'DESKTOP'
-[Desktop Entry]
-Name=v2rayN
-Comment=v2rayN
-Exec=/opt/v2rayN/v2rayN
-Terminal=false
-Type=Application
-Categories=Network;
-DESKTOP
+    as_root /usr/bin/python3 "${NETWORK_HELPER%/*}/archive_apps.py" "$ARCH" --configure-v2rayn
 }
 
 install_v2rayn() (
@@ -32,7 +23,7 @@ install_v2rayn() (
     fi
     if v2rayn_existing_binary; then
         v2rayn_desktop_entry
-        say "已复用本机 v2rayN 并补全桌面入口，没有更新程序版本。"
+        say "已复用本机 v2rayN 并检查现有桌面入口。"
         return 0
     fi
     local urls=()

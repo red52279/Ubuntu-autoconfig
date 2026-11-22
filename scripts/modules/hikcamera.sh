@@ -9,15 +9,22 @@ install_hikcamera() (
     fi
     local destination=/opt/MVS desktop=/usr/share/applications/MVS.desktop
     local runtime=/var/lib/ubuntu-autoconfig/mvs account=${SUDO_USER:-$(id -un)}
-    local tmp_dir= staging= url machine archive_entries bundle payload
+    local tmp_dir= staging= previous= url machine archive_entries bundle payload
     apt_install ca-certificates unzip net-tools x11-utils libgl1 libx11-xcb1 libxkbcommon-x11-0 \
         libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libusb-1.0-0
-    if [[ ! -x "$destination/bin/MVS" ]]; then
-        [[ ! -e "$destination" && ! -L "$destination" ]] || die "$destination 已存在但不完整，请检查现有 MVS 目录。"
+    if (( ${UPDATE_ARCHIVE:-0} )) || [[ ! -x "$destination/bin/MVS" ]]; then
+        [[ ! -L "$destination" && ( ! -e "$destination" || -x "$destination/bin/MVS" ) ]] ||
+            die "$destination 已存在但不符合 MVS 安装布局，请检查。"
         machine=$(architecture_name)
-        url=$(/usr/bin/python3 "${NETWORK_HELPER%/*}/vendor_release.py" hikcamera "$ARCH")
+        url=${MVS_RELEASE_URL:-}
+        if [[ -z "$url" ]]; then url=$(/usr/bin/python3 "${NETWORK_HELPER%/*}/vendor_release.py" hikcamera "$ARCH"); fi
         tmp_dir=$(mktemp -d)
-        trap 'rm -rf -- "$tmp_dir"; if [[ -n "$staging" ]]; then as_root rm -rf -- "$staging"; fi' EXIT
+        trap 'rm -rf -- "$tmp_dir"
+            if [[ -n "$previous" && -d "$previous/app" && ! -e "$destination" ]]; then
+                as_root mv -T -- "$previous/app" "$destination"
+            fi
+            if [[ -n "$previous" ]]; then as_root rm -rf -- "$previous"; fi
+            if [[ -n "$staging" ]]; then as_root rm -rf -- "$staging"; fi' EXIT
         download_from_mirrors "$tmp_dir/mvs.zip" "$url"
         archive_entries=$(unzip -Z1 "$tmp_dir/mvs.zip")
         bundle=$(grep -E "^MVS-[0-9.]+_${machine}_[0-9]{8}\\.tar\\.gz$" <<< "$archive_entries" || true)
@@ -38,6 +45,10 @@ install_hikcamera() (
         as_root install -d -m 0755 -o "$account" "$runtime/Temp" "$runtime/Temp/Log"
         as_root ln -s "$runtime/Temp" "$staging/bin/Temp"
         as_root chmod 0755 "$staging"
+        if [[ -d "$destination" ]]; then
+            previous=$(as_root mktemp -d /opt/.ubuntu-autoconfig-mvs-previous.XXXXXX)
+            as_root mv -T -- "$destination" "$previous/app"
+        fi
         as_root mv -T -- "$staging" "$destination"
         staging=
     fi

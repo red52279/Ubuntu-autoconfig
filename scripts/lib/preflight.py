@@ -9,6 +9,7 @@ from pathlib import Path
 import pwd
 import subprocess
 from catalog import FEATURES, LOCAL_DEB_PACKAGES, ROS, support
+from archive_apps import CLION_PATH, clion_archive, clion_version, v2rayn_desktop_ready
 from input_config import (ENGLISH_IBUS_ENGINE, ENGLISH_LAYOUT, FCITX_ENGLISH, FCITX_PROGRAM,
                           GNOME_SOURCES, LOGIN_COMMAND, LOGIN_TARGET, LOGIN_UNIT,
                           keyboard_layouts, read_ini)
@@ -108,6 +109,12 @@ class Inventory:
             return self.result(name,'unknown','仅验证目标平台支持范围；安装包和配置需在目标机器检测')
         if name == 'anaconda' and not Path('/opt/anaconda3/bin/python').exists():
             return self.result(name,'missing','尚未安装 Anaconda')
+        if name == 'clion' and not clion_version(CLION_PATH):
+            try:
+                clion_archive(self.arch)
+            except ValueError as exc:
+                return self.result(name, 'disabled', str(exc))
+            return self.result(name, 'missing', '使用 packages.local 中的 JetBrains Linux 安装包')
         if name == 'v2rayn' and binary_arch('/opt/v2rayN/v2rayN') != self.arch:
             if os.environ.get('V2RAYN_DOMESTIC_URLS'):
                 return self.result(name, 'missing', '将使用指定的国内镜像')
@@ -136,6 +143,9 @@ class Inventory:
         return self.result(name,'ready' if ready else 'configure',reason,packages)
 
     def configuration(self, name):
+        if name == 'clion':
+            return (os.access(CLION_PATH / 'bin/clion.sh', os.X_OK)
+                    and Path('/usr/share/applications/jetbrains-clion.desktop').is_file()), '检查 CLion 和桌面入口'
         if name == 'chrome':
             flags = {'repo_add_once', 'repo_reenable_on_distupgrade'}
             settings = [line.strip() for line in read('/etc/default/google-chrome').splitlines()
@@ -221,7 +231,7 @@ class Inventory:
             return False,'需检查推荐显卡驱动'
         if name == 'v2rayn':
             binary = Path('/opt/v2rayN/v2rayN')
-            return binary_arch(binary)==self.arch and os.access(binary,os.X_OK) and Path('/usr/share/applications/v2rayn.desktop').exists(),'检查已有程序架构及桌面入口'
+            return binary_arch(binary)==self.arch and os.access(binary,os.X_OK) and v2rayn_desktop_ready(),'检查已有程序架构及重复桌面入口'
         if name == 'hikcamera':
             return (os.access('/opt/MVS/bin/MVS', os.X_OK)
                     and os.access('/opt/MVS/bin/MVS.sh', os.X_OK)

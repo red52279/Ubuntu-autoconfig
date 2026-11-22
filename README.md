@@ -20,7 +20,7 @@ sudo ./install.sh --background                  # 选择后交给 systemd 后台
 | 功能 | `--only` 取值 | 内容 |
 |---|---|---|
 | 基础工具、编辑、归档 | `base_tools`、`gedit`、`media_tools` | Git、curl、Python、Vim、编译工具、gedit、ZIP 和 RAR 工具 |
-| 开发与图形界面 | `dev_tools`、`desktop_tools` | CMake、Ninja、OpenCV、Eigen、ZBar、Aravis、Qt6 和 Qt Creator。Qt6 按 22.04、24.04、26.04 仓库提供情况安装 |
+| 开发与图形界面 | `dev_tools`、`desktop_tools`、`clion` | CMake、Ninja、OpenCV、Eigen、ZBar、Aravis、Qt6、Qt Creator 和 JetBrains CLion。Qt6 按 22.04、24.04、26.04 仓库提供情况安装 |
 | 中文环境 | `language_input` | 简体中文界面、英文标准目录。登录、虚拟终端和 GNOME 新窗口默认美式英语，可切换中文 |
 | 双系统与磁盘 | `time_sync`、`storage_tools` | Chrony 国内校时和 Windows 本地硬件时钟；NTFS、exFAT、UDisks 工具，外置盘按桌面文件管理器流程挂载 |
 | NVIDIA 与 CUDA | `gpu_driver`、`cuda` | Ubuntu 推荐驱动和仓库中的 CUDA 工具链。适用于 amd64，驱动按硬件检测 |
@@ -43,6 +43,25 @@ Chrome、Edge、VS Code 和 v2rayN 使用山东大学星火镜像，校验索引
 
 普通运行会跳过已经就绪的功能。`--reinstall` 重检或修复现有配置。`--clean-reinstall` 需配合 `--only`，先验证替换包和卸载依赖，再重装已配置的独立应用，例如 Chrome 或 QQ。下载缓存支持断点续传。旧版安装器留下的固定磁盘挂载配置可用 `sudo ./install.sh --cli --only storage_tools` 清理。
 
+CLion 使用 JetBrains 的统一安装包，个人学习、开源和其他非商业用途可在应用中选择免费授权。将下载的原始 Linux 稳定版归档放入 `packages.local/`，例如 `CLion-2026.3.0.1.tar.gz` 或 ARM64 的 `CLion-2026.3.0.1-aarch64.tar.gz`，再运行 `sudo ./install.sh --cli --only clion`。[JetBrains 中国站](https://www.jetbrains.com.cn/clion/)
+
+本机已有 v2rayN 时，安装器复用现有程序及可用的原启动器。只需修复桌面入口时，可运行 `sudo /usr/bin/python3 -B scripts/lib/archive_apps.py "$(dpkg --print-architecture)" --configure-v2rayn`。
+
+## 版本更新与回退
+
+```bash
+sudo ./manage.sh check-updates
+sudo ./manage.sh check-updates --only clion,v2rayn,gedit
+sudo ./manage.sh update --only gedit,v2rayn
+sudo ./manage.sh rollback-version --dry-run
+sudo ./manage.sh rollback-version --yes
+sudo ./manage.sh rollback-version --run 运行ID --yes
+```
+
+检查会用国内白名单源刷新 APT 索引并比较已安装功能的版本，系统原有源配置保留。通过 deb 安装的独立应用按现有国内下载渠道或本地包检查，部分厂商需要读取下载包才提供版本信息，结果可复用下载缓存。`update` 在应用前也会检查版本。全量更新覆盖本机已安装的功能，整机软件包升级可显式指定 `--only system_upgrade`。CLion 从 JetBrains 中国站检测版本，新版本的归档放入 `packages.local/` 后由更新命令安装。
+
+每次实际更新都会记录版本和涉及的配置。APT 旧包能从缓存或签名镜像取得时会保存，CLion、MVS 和脚本管理的 Anaconda 会记录旧安装目录。回退按整次更新记录执行，先检查现有版本和依赖，确认后使用 `--yes`。旧版本若已撤下且无备份则无法回退。其他渠道安装且无法识别版本的程序会显示检查原因。
+
 ## 进度、重试与回滚
 
 ```bash
@@ -56,7 +75,7 @@ sudo ./uninstall.sh --dry-run
 sudo ./uninstall.sh --yes
 ```
 
-安装总结记录每项状态和失败后的重试命令。正式运行的日志和总结位于 `/var/log/ubuntu-autoconfig/`，状态、源备份和回滚记录位于 `/var/lib/ubuntu-autoconfig/`。回滚根据指定运行的记录删除当次新增且版本仍匹配的软件，恢复仍与记录一致的配置。可用 `--run 运行ID` 选择记录。系统升级后的版本降级需要单独处理。
+安装总结记录每项状态和失败后的重试命令。正式运行的日志和总结位于 `/var/log/ubuntu-autoconfig/`，状态、源备份和回滚记录位于 `/var/lib/ubuntu-autoconfig/`。`uninstall.sh` 按普通安装记录清理当次新增的软件并恢复配置，更新版本的降级使用 `rollback-version`。
 
 预演写入项目的 `runs/`，设置 `XDG_STATE_HOME` 时使用其中的 `ubuntu-autoconfig/runs/`。正式安装和回滚使用 `/var/lib/ubuntu-autoconfig/runs/`。每次运行创建独立的临时目录，退出时清理。断点下载保存在系统的 `runs/cache/`，可用 `sudo ./manage.sh cleanup` 清理。系统包管理器的缓存和需要原子替换的文件使用其目标文件系统。
 

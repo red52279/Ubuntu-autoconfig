@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.part
+*.deb
+*.zip
+*.AppImage
+/validation/
+/runs/
+/storage.local.json
+/packages.local/
+*.bak
+*~
