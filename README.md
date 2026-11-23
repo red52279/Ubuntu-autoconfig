@@ -39,7 +39,7 @@ ROS 映射为 Ubuntu 20.04 → Noetic、22.04 → Humble、24.04 → Jazzy、26.
 
 APT 和下载器直连国内镜像及厂商白名单。Ubuntu 镜像在清华、中科大、南京大学、阿里云间测速，ARM 使用国内 Ubuntu Ports。ROS 的 APT 源在清华、阿里云、中科大间回退，rosdep 索引使用清华。可用 `sudo ./install.sh --cli --only sources --reinstall` 重新测速换源。
 
-Chrome、Edge、VS Code 和 v2rayN 使用山东大学星火镜像，校验索引签名和包的 SHA-256。可信的本地包可放入 `packages.local/`，例如 `google-chrome-stable_amd64.deb`。星火商店直连 Gitee，QQ 和微信走腾讯的官方下载，Typora 使用中国下载 CDN。旧命令 `--only chromium` 仍可选中 Chrome。
+Chrome、Edge、VS Code 和 v2rayN 使用山东大学星火镜像，校验索引签名和包的 SHA-256。可信的本地包可放入 `packages.local/`，例如 `google-chrome-stable_amd64.deb`。星火商店直连 Gitee，QQ 和微信走腾讯的官方下载。Typora 从中国 CDN 下载并核对官方签名索引，首次重新运行 Typora 项会迁移旧版安装器创建的 APT 源，之后用 `manage.sh check-updates` 和 `manage.sh update` 检查与更新。旧命令 `--only chromium` 仍可选中 Chrome。
 
 普通运行会跳过已经就绪的功能。`--reinstall` 重检或修复现有配置。`--clean-reinstall` 需配合 `--only`，先验证替换包和卸载依赖，再重装已配置的独立应用，例如 Chrome 或 QQ。下载缓存支持断点续传。旧版安装器留下的固定磁盘挂载配置可用 `sudo ./install.sh --cli --only storage_tools` 清理。
 

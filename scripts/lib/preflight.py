@@ -10,6 +10,7 @@ import pwd
 import subprocess
 from catalog import FEATURES, LOCAL_DEB_PACKAGES, ROS, support
 from archive_apps import CLION_PATH, clion_version, v2rayn_desktop_ready
+from vendor_release import managed_typora_source
 from input_config import (ENGLISH_IBUS_ENGINE, ENGLISH_LAYOUT, FCITX_ENGLISH, FCITX_PROGRAM,
                           GNOME_SOURCES, LOGIN_COMMAND, LOGIN_TARGET, LOGIN_UNIT,
                           keyboard_layouts, read_ini)
@@ -131,8 +132,8 @@ class Inventory:
             if name in ('edge', 'vscode'):
                 return self.vendor_deb_status(name)
             return self.result(name,'missing','缺少: ' + ', '.join(missing),packages)
-        if name == 'typora' and 'https://typoraio.cn/linux ./' in read('/etc/apt/sources.list.d/typora.list'):
-            return self.result(name,'configure','旧 Typora 软件源需要切换到下载 CDN',packages)
+        if name == 'typora' and managed_typora_source(read('/etc/apt/sources.list.d/typora.list')):
+            return self.result(name,'configure','迁移旧版 Typora APT 源并保留签名校验',packages)
         if spec['kind'] in ('packages','deb','repository'):
             return self.result(name,'ready','所需软件包已安装',packages)
         ready, reason = self.configuration(name)

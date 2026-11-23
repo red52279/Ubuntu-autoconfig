@@ -194,23 +194,42 @@ install_wechat() {
     EXPECTED_DEB_PACKAGE=wechat install_downloaded_deb "${urls[@]}"
 }
 
-install_typora() {
-    apt_install gnupg ca-certificates
-    local key=/usr/share/keyrings/typora-archive-keyring.gpg
+fetch_typora_deb() (
+    local output=$1 tmp_dir release url digest
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf -- "$tmp_dir"' EXIT
+    install_signing_key "$tmp_dir/typora.gpg" 4AC441BE68B4ADAB7439FBF9BA300B7755AFCFAE \
+        https://typoraio.cn/linux/public-key.asc
+    download_from_mirrors "$tmp_dir/InRelease" https://downloads.typoraio.cn/linux/InRelease
+    gpgv --keyring "$tmp_dir/typora.gpg" --output "$tmp_dir/Release" "$tmp_dir/InRelease"
+    download_from_mirrors "$tmp_dir/Packages" https://downloads.typoraio.cn/linux/Packages
+    release=$(/usr/bin/python3 "${NETWORK_HELPER%/*}/vendor_release.py" typora-archive "$ARCH" \
+        --release "$tmp_dir/Release" --index "$tmp_dir/Packages")
+    IFS=$'\t' read -r url digest <<< "$release"
+    DOWNLOAD_TIMEOUT=300 download_from_mirrors "$output" "$url"
+    printf '%s  %s\n' "$digest" "$output" | sha256sum --check --status
+)
+
+install_typora() (
     local list=/etc/apt/sources.list.d/typora.list
-    if (( ! DRY_RUN )); then
-        as_root install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d
-        install_signing_key "$key" 4AC441BE68B4ADAB7439FBF9BA300B7755AFCFAE \
-            https://typoraio.cn/linux/public-key.asc
-        # The signed flat index is under linux/, and its Filename paths
-        # already begin with linux/. APT resolves them from the CDN root.
-        apt_configure_source "$list" <<SOURCE
-deb [arch=$ARCH signed-by=$key] https://downloads.typoraio.cn linux/
-SOURCE
-        APT_UPDATED=1
+    if (( DRY_RUN )); then
+        say "将验证 Typora 官方签名索引并使用中国 CDN 安装，迁移旧版 APT 配置"
+        return 0
     fi
-    apt_install typora
-}
+    if (( ${CLEAN_REINSTALL:-0} )) || ! has_pkg typora; then
+        local tmp_dir
+        apt_install ca-certificates gnupg gpgv
+        tmp_dir=$(mktemp -d)
+        trap 'rm -rf -- "$tmp_dir"' EXIT
+        fetch_typora_deb "$tmp_dir/package.deb"
+        install_checked_deb "$tmp_dir/package.deb" typora
+    fi
+    if [[ -f "$list" ]] && /usr/bin/python3 "${NETWORK_HELPER%/*}/vendor_release.py" \
+        typora-legacy-source "$ARCH" --source "$list"; then
+        as_root rm -- "$list"
+        say "已移除旧版安装器生成的 Typora APT 源，版本检查使用官方签名索引。"
+    fi
+)
 
 configure_anaconda_channels() {
     if (( DRY_RUN )); then return 0; fi

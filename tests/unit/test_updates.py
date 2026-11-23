@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -12,6 +13,7 @@ from run_files import temporary_directory
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts/lib'))
 import archive_apps
 import updates
+import vendor_release
 
 
 class ArchiveTests(unittest.TestCase):
@@ -49,20 +51,43 @@ class ArchiveTests(unittest.TestCase):
         with temporary_directory() as directory:
             root = Path(directory)
             archive = root / 'CLion-2026.3.1.tar.gz'
-            product = dict(productCode='CL', version='2026.3.1', launch=[dict(os='Linux', arch='x86_64')])
+            product = dict(productCode='CL', version='2026.3.1', launch=[dict(os='Linux', arch='amd64')])
             with tarfile.open(archive, 'w:gz') as tar:
-                for name, data in (('product-info.json', json.dumps(product)), ('bin/clion.sh', '#!/bin/sh\n')):
+                for name, data in (('product-info.json', json.dumps(product)), ('bin/clion.sh', '#!/bin/sh\n'),
+                                   ('jbr/legal/java.base/LICENSE', 'license')):
                     entry = tarfile.TarInfo('clion/' + name)
                     entry.size = len(data)
                     entry.mode = 0o755
                     tar.addfile(entry, io.BytesIO(data.encode()))
+                link = tarfile.TarInfo('clion/jbr/legal/java.naming/LICENSE')
+                link.type = tarfile.SYMTYPE
+                link.linkname = '../java.base/LICENSE'
+                tar.addfile(link)
+                for _ in range(2):
+                    header = tarfile.TarInfo('clion/jbr/legal')
+                    header.type = tarfile.DIRTYPE
+                    header.mode = 0o755
+                    tar.addfile(header)
             installed = root / 'opt-clion'
             archive_apps.install_clion('amd64', installed, root)
             self.assertEqual(archive_apps.clion_version(installed), '2026.3.1')
+            self.assertEqual((installed / 'jbr/legal/java.naming/LICENSE').read_text(), 'license')
             archive.rename(root / 'CLion-2026.3.2.tar.gz')
             with self.assertRaisesRegex(ValueError, '版本'):
                 archive_apps.install_clion('amd64', installed, root)
             self.assertEqual(archive_apps.clion_version(installed), '2026.3.1')
+
+    def test_clion_rejects_extraction_through_an_archive_link(self):
+        with temporary_directory() as directory:
+            archive = Path(directory) / 'archive.tar.gz'
+            with tarfile.open(archive, 'w:gz') as tar:
+                link = tarfile.TarInfo('clion/lib/link')
+                link.type = tarfile.SYMTYPE
+                link.linkname = '../bin'
+                tar.addfile(link)
+                tar.addfile(tarfile.TarInfo('clion/lib/link/file'), io.BytesIO(b''))
+            with self.assertRaisesRegex(ValueError, '链接或普通文件下写入'):
+                archive_apps.clion_archive_links(archive)
 
     def test_v2rayn_removes_only_the_installers_duplicate_launcher(self):
         with temporary_directory() as directory:
@@ -83,6 +108,24 @@ class ArchiveTests(unittest.TestCase):
 
 
 class VersionTests(unittest.TestCase):
+    def test_typora_uses_latest_signed_package_and_recognizes_only_legacy_source(self):
+        with temporary_directory() as directory:
+            root = Path(directory)
+            index, release = root / 'Packages', root / 'Release'
+            lines = [
+                f'Package: typora\nVersion: {version}-1\nArchitecture: {arch}\n'
+                f'Filename: linux/typora_{version}_{arch}.deb\nSHA256: {"a" * 64}\n'
+                for version, arch in (('1.9.1', 'amd64'), ('1.14.9', 'amd64'), ('1.20.1', 'arm64'))
+            ]
+            data = '\n'.join(lines).encode()
+            index.write_bytes(data)
+            release.write_text(f'SHA256:\n {hashlib.sha256(data).hexdigest()} {len(data)} Packages\n')
+            url, _ = vendor_release.typora_archive('amd64', release, index)
+            self.assertEqual(url, 'https://downloads.typoraio.cn/linux/typora_1.14.9_amd64.deb')
+        legacy = 'deb [arch=amd64 signed-by=/usr/share/keyrings/typora-archive-keyring.gpg] https://downloads.typoraio.cn linux/'
+        self.assertTrue(vendor_release.managed_typora_source(legacy))
+        self.assertFalse(vendor_release.managed_typora_source(legacy + '\n# Custom configuration'))
+
     def test_update_sources_keep_domestic_stanzas_and_skip_foreign_stanzas(self):
         domestic = 'Types: deb\nURIs: https://mirrors.aliyun.com/ubuntu\nSuites: noble\nComponents: main\n'
         foreign = 'Types: deb\nURIs: https://packages.microsoft.com/repos/code\nSuites: stable\nComponents: main\n'

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import time
 from urllib.parse import urlencode, urlsplit
 
@@ -13,6 +14,7 @@ from network import check_url, open_direct
 SPARK_API = 'https://gitee.com/api/v5/repos/spark-store-project/spark-store/releases/latest'
 HIK_API = 'https://www.hikrobotics.com/cn/Api/Foreground/Support/v2/DownCenter'
 SPARK_MIRROR = 'https://mirrors.sdu.edu.cn/spark-store'
+TYPORA_CDN = 'https://downloads.typoraio.cn'
 
 
 def release_json(url):
@@ -40,16 +42,20 @@ def spark_release(arch):
     raise ValueError('厂商发布中没有匹配架构和格式的正式安装包')
 
 
-def spark_archive(arch, package, release, index):
+def signed_packages(release, index):
     """Read Packages only after its SHA-256 is matched to the verified Release."""
     expected = re.search(r'^SHA256:\n((?:[ \t]+[^\n]+\n)+)', release.read_text(), re.M)
     data = index.read_bytes()
     actual = [hashlib.sha256(data).hexdigest(), str(len(data)), 'Packages']
     if not expected or not any(row.split() == actual for row in expected[1].splitlines()):
-        raise ValueError('星火镜像 Packages 与签名索引不一致，请稍后重试')
+        raise ValueError('Packages 与签名索引不一致，请稍后重试')
     for stanza in data.split(b'\n\n'):
-        fields = dict(line.split(': ', 1) for line in stanza.decode('utf-8', errors='replace').splitlines()
-                      if line and not line[0].isspace() and ': ' in line)
+        yield dict(line.split(': ', 1) for line in stanza.decode('utf-8', errors='replace').splitlines()
+                   if line and not line[0].isspace() and ': ' in line)
+
+
+def spark_archive(arch, package, release, index):
+    for fields in signed_packages(release, index):
         if fields.get('Package') != package or fields.get('Architecture') != arch:
             continue
         filename = fields['Filename']
@@ -60,6 +66,31 @@ def spark_archive(arch, package, release, index):
             raise ValueError('星火镜像安装包路径或 SHA-256 无效')
         return check_url(f'{SPARK_MIRROR}/{arch}-store/{filename[2:]}'), digest
     raise ValueError(f'星火国内镜像没有 {arch} 的 {package} 包')
+
+
+def typora_archive(arch, release, index):
+    selected = None
+    for fields in signed_packages(release, index):
+        if fields.get('Package') != 'typora' or fields.get('Architecture') != arch:
+            continue
+        if selected is None or subprocess.run(
+            ['dpkg', '--compare-versions', fields['Version'], 'gt', selected['Version']], check=False
+        ).returncode == 0:
+            selected = fields
+    if not selected:
+        raise ValueError(f'Typora 签名索引没有 {arch} 安装包')
+    filename, digest = selected['Filename'], selected['SHA256']
+    if (not re.fullmatch(rf'linux/typora_[0-9][a-zA-Z0-9.+~-]*_{arch}\.deb', filename)
+            or not re.fullmatch(r'[0-9a-f]{64}', digest)):
+        raise ValueError('Typora 安装包路径或 SHA-256 无效')
+    return check_url(f'{TYPORA_CDN}/{filename}'), digest
+
+
+def managed_typora_source(text):
+    return bool(re.fullmatch(
+        r'deb \[arch=(?:amd64|arm64) signed-by=/usr/share/keyrings/typora-archive-keyring\.gpg\] '
+        r'(?:https://typoraio\.cn/linux \./|https://downloads\.typoraio\.cn linux/)',
+        text.strip()))
 
 
 def hik_release(arch):
@@ -85,11 +116,12 @@ def hik_release(arch):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('app', choices=('spark-store', 'spark-archive', 'hikcamera'))
+    parser.add_argument('app', choices=('spark-store', 'spark-archive', 'typora-archive', 'typora-legacy-source', 'hikcamera'))
     parser.add_argument('arch', choices=('amd64', 'arm64'))
     parser.add_argument('--package', choices=('google-chrome-stable', 'microsoft-edge-stable', 'code', 'v2rayn'))
     parser.add_argument('--release', type=Path)
     parser.add_argument('--index', type=Path)
+    parser.add_argument('--source', type=Path)
     args = parser.parse_args()
     try:
         if args.app == 'spark-store':
@@ -98,6 +130,14 @@ def main():
             if not (args.package and args.release and args.index):
                 parser.error('spark-archive requires --package, --release and --index')
             print(*spark_archive(args.arch, args.package, args.release, args.index), sep='\t')
+        elif args.app == 'typora-archive':
+            if not (args.release and args.index):
+                parser.error('typora-archive requires --release and --index')
+            print(*typora_archive(args.arch, args.release, args.index), sep='\t')
+        elif args.app == 'typora-legacy-source':
+            if not args.source:
+                parser.error('typora-legacy-source requires --source')
+            raise SystemExit(0 if managed_typora_source(args.source.read_text()) else 1)
         else:
             print(hik_release(args.arch))
     except (OSError, ValueError, KeyError, TypeError) as exc:

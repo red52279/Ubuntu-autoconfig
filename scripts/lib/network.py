@@ -184,11 +184,13 @@ def download(url, output, kind, cache=None, expected=None, *, opener=None, expec
             metadata = {}
         current_validator = (expected or {}).get('etag') or (expected or {}).get('modified')
         stored_identity = metadata.get('identity', metadata.get('url'))
-        if (complete.exists() and stored_identity == identity and current_validator
-                and current_validator == metadata.get('validator')
-                and (expected_sha256 is None or metadata.get('sha256') == expected_sha256)
-                and metadata.get('sha256') == file_sha256(complete)):
+        cached_digest = metadata.get('sha256')
+        trusted_cache = (cached_digest == expected_sha256 if expected_sha256 else
+                         current_validator and current_validator == metadata.get('validator'))
+        if (complete.exists() and stored_identity == identity and trusted_cache
+                and cached_digest == file_sha256(complete)):
             shutil.copyfile(complete, output)
+            print(f'[复用缓存] {public_url(url)}', file=sys.stderr)
             return
         validator = metadata.get('validator') if stored_identity == identity else None
         if current_validator and current_validator != validator:

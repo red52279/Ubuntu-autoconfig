@@ -381,9 +381,9 @@ select_features() {
 
 install_system_upgrade() {
     apt_update
-    say "升级已安装软件；保留其他软件的依赖，版本升级不能保证自动降级回滚。"
+    say "升级已安装软件，按需添加依赖并保留现有软件包。版本升级不能保证自动降级回滚。"
     (( DRY_RUN )) && return 0
-    apt_get upgrade -y
+    apt_get --with-new-pkgs --no-remove upgrade -y
 }
 
 ensure_domestic_sources() {

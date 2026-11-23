@@ -15,11 +15,11 @@ from catalog import FEATURES, ROS, support
 from desktop_locale import write_file
 from journal import Journal, ROOT, STATE, copy_path, fingerprint, packages
 from network import check_url
-from vendor_release import hik_release
+from vendor_release import hik_release, managed_typora_source
 
 DEB_APPS = {
     'chrome': 'google-chrome-stable', 'edge': 'microsoft-edge-stable', 'vscode': 'code',
-    'v2rayn': 'v2rayn', 'qq': 'linuxqq', 'wechat': 'wechat', 'spark_store': 'spark-store',
+    'v2rayn': 'v2rayn', 'qq': 'linuxqq', 'wechat': 'wechat', 'spark_store': 'spark-store', 'typora': 'typora',
     'language_input': 'sogoupinyin',
 }
 ARCHIVES = {'clion': CLION_PATH, 'hikcamera': Path('/opt/MVS'), 'anaconda': Path('/opt/anaconda3')}
@@ -89,7 +89,10 @@ def prepare_apt_sources(work):
     for path in [etc / 'sources.list', *(etc / 'sources.list.d').glob('*.list'), *(etc / 'sources.list.d').glob('*.sources')]:
         if not path.is_file():
             continue
-        selected, skipped = approved_source_text(path.read_text(), path.suffix == '.sources')
+        source = path.read_text()
+        if path.name == 'typora.list' and managed_typora_source(source):
+            continue
+        selected, skipped = approved_source_text(source, path.suffix == '.sources')
         if skipped:
             print(f'版本操作跳过 {path.name} 中的非白名单源', flush=True)
         target = sources / path.name if path == etc / 'sources.list' else parts / path.name
@@ -143,6 +146,7 @@ def vendor_candidate(feature, package, arch, directory):
     commands = {
         'qq': 'url=$(qq_release_url); download_from_mirrors "$target" "$url"',
         'wechat': 'mapfile -t urls < <(wechat_release_urls); download_from_mirrors "$target" "${urls[@]}"',
+        'typora': 'fetch_typora_deb "$target"',
         'spark_store': 'url=$(python3 "$SCRIPT_DIR/scripts/lib/vendor_release.py" spark-store "$ARCH"); download_from_mirrors "$target" "$url"',
         'language_input': 'source "$SCRIPT_DIR/scripts/modules/language_input.sh"; fetch_sogou_deb "$target"',
     }

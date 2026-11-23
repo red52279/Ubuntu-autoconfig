@@ -5,7 +5,8 @@ import fcntl
 from http.client import HTTPException
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from posixpath import normpath
 import re
 import shlex
 import shutil
@@ -15,7 +16,7 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
-from network import download, file_sha256, open_direct, probe, public_url
+from network import download, file_sha256, open_direct, public_url
 from desktop_locale import write_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -151,13 +152,10 @@ def download_clion(arch, version, output, cache=None):
     if output.is_file() and file_sha256(output) == digest:
         return digest
     url = f'https://{CLION_ORIGIN}/cpp/{clion_filename(arch, version)}'
-    sample = probe(url, 'gzip', opener=open_clion_download)
-    if not sample['ok']:
-        raise ValueError(f"CLion 安装包直连失败: {sample['error']}")
-    print(f'[直连下载] {clion_filename(arch, version)}（JetBrains 中国 CDN）', flush=True)
+    print(f'[CLion] 校验缓存或下载 {clion_filename(arch, version)}', flush=True)
     for attempt in range(3):
         try:
-            download(url, output, 'gzip', cache, sample, opener=open_clion_download, expected_sha256=digest)
+            download(url, output, 'gzip', cache, opener=open_clion_download, expected_sha256=digest)
             return digest
         except (OSError, ValueError, HTTPException):
             if attempt == 2:
@@ -197,6 +195,40 @@ def install_clion(arch, directory=CLION_PATH, package_dir=None, version=None):
         unpack_clion(arch, directory, selected, archive)
 
 
+def clion_archive_links(archive):
+    entries, links, hardlinks = {}, [], []
+    top = None
+    with tarfile.open(archive, 'r:gz') as stream:
+        for entry in stream:
+            path = PurePosixPath(entry.name)
+            if path.is_absolute() or '..' in path.parts or not path.parts:
+                raise ValueError('CLion 归档中存在无效路径')
+            top = top or path.parts[0]
+            previous = entries.get(path)
+            if (path.parts[0] != top or (previous and not (previous.isdir() and entry.isdir()))
+                    or (len(path.parts) == 1 and not entry.isdir())
+                    or not (entry.isfile() or entry.isdir() or entry.issym() or entry.islnk())):
+                raise ValueError('CLion 归档布局或文件类型无效')
+            entries[path] = entry
+            if entry.issym():
+                relative = PurePosixPath(*path.parts[1:])
+                target = PurePosixPath(normpath(relative.parent / entry.linkname))
+                if target.is_absolute() or '..' in target.parts:
+                    raise ValueError('CLion 归档中的链接超出安装目录')
+                links.append(relative)
+            elif entry.islnk():
+                hardlinks.append(PurePosixPath(entry.linkname))
+
+    # Extraction must never write through an archive link. A symlink's
+    # resolved target can then be validated safely in the staged tree.
+    for path in entries:
+        if any(parent in entries and not entries[parent].isdir() for parent in path.parents):
+            raise ValueError('CLion 归档试图在链接或普通文件下写入')
+    if any(target not in entries or not entries[target].isfile() for target in hardlinks):
+        raise ValueError('CLion 归档包含无效的硬链接目标')
+    return links
+
+
 def unpack_clion(arch, directory, version, archive):
     if directory.exists() and not clion_version(directory):
         raise ValueError(f'{directory} 已存在且无法识别为 CLion 安装目录')
@@ -210,30 +242,22 @@ def unpack_clion(arch, directory, version, archive):
         fields = checksum.read_text().split()
         if not fields or fields[0].lower() != file_sha256(archive):
             raise ValueError('CLion 归档和提供的 SHA-256 校验文件不匹配')
+    links = clion_archive_links(archive)
     with tempfile.TemporaryDirectory(prefix='.clion-', dir=directory.parent) as stage:
         new = Path(stage) / 'application'
         new.mkdir(mode=0o755)
-        # The local archive must contain one root directory and no paths
-        # that can escape it when unpacked.
-        with tarfile.open(archive, 'r:gz') as stream:
-            top = None
-            for entry in stream:
-                path = Path(entry.name)
-                if path.is_absolute() or '..' in path.parts or not path.parts:
-                    raise ValueError('CLion 归档中存在无效路径')
-                top = top or path.parts[0]
-                if path.parts[0] != top or not (entry.isfile() or entry.isdir() or entry.issym() or entry.islnk()):
-                    raise ValueError('CLion 归档布局或文件类型无效')
-                if entry.issym() or entry.islnk():
-                    target = Path(entry.linkname)
-                    if target.is_absolute() or '..' in target.parts:
-                        raise ValueError('CLion 归档中的链接指向未知位置')
         subprocess.run(['tar', '-xzf', str(archive), '--strip-components=1', '--no-same-owner',
                         '--no-same-permissions', '-C', str(new)], check=True)
+        root = new.resolve()
+        for link in links:
+            resolved = (new / link).resolve()
+            if resolved != root and root not in resolved.parents:
+                raise ValueError('CLion 归档中的链接解析后超出安装目录')
         if clion_version(new) != version or not os.access(new / 'bin/clion.sh', os.X_OK):
             raise ValueError('CLion 文件名版本与产品元数据不一致，或包内缺少启动程序')
         info = json.loads((new / 'product-info.json').read_text())
-        if not any(item.get('os') == 'Linux' and item.get('arch') == MACHINE[arch] for item in info.get('launch', [])):
+        if not any(item.get('os') == 'Linux' and item.get('arch') in (arch, MACHINE[arch])
+                   for item in info.get('launch', [])):
             raise ValueError('CLion 包的目标系统或架构与本机不匹配')
         previous = Path(stage) / 'previous'
         if directory.exists():

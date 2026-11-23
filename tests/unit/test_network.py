@@ -1,4 +1,5 @@
 import io
+import hashlib
 import importlib.util
 from pathlib import Path
 from run_files import temporary_directory
@@ -153,6 +154,21 @@ class NetworkTests(unittest.TestCase):
                     network.download('https://mirrors.nju.edu.cn/a', output, 'gzip', expected_sha256='0' * 64)
             self.assertEqual(output.read_bytes(), b'previous')
             self.assertFalse(Path(str(output) + '.part').exists())
+
+    def test_official_checksum_reuses_complete_cache_without_a_cdn_request(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            cache, output = root / 'cache', root / 'archive.tar.gz'
+            url = 'https://mirrors.nju.edu.cn/archive.tar.gz'
+            payload = b'\x1f\x8barchive'
+            digest = hashlib.sha256(payload).hexdigest()
+            with patch.object(network, 'open_direct', return_value=Response(payload)):
+                network.download(url, output, 'gzip', cache, expected_sha256=digest)
+            output.unlink()
+            with patch.object(network, 'open_direct') as request:
+                network.download(url, output, 'gzip', cache, expected_sha256=digest)
+                request.assert_not_called()
+            self.assertEqual(output.read_bytes(), payload)
 
     def test_faster_valid_mirror_ranks_first(self):
         def probe(url, kind):
