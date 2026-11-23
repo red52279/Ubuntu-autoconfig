@@ -1,6 +1,6 @@
 # Ubuntu 国内源自动配置
 
-面向 Ubuntu 20.04–26.04，自动识别 amd64、arm64 和 armhf。安装器在操作前检查本机软件和配置，按系统版本与架构显示可用功能，安装后复查结果。默认配置启用基础工具、gedit、中文语言与输入法、双系统校时、NTFS 和 exFAT 支持。
+面向 Ubuntu 20.04、22.04、24.04、26.04 LTS，自动识别 amd64、arm64 和 armhf。安装器在操作前检查本机软件和配置，按系统版本与架构显示可用功能，安装后复查结果。默认配置启用基础工具、gedit、中文语言与输入法、双系统校时、NTFS 和 exFAT 支持。
 
 ## 开始使用
 
@@ -13,25 +13,25 @@ sudo ./install.sh --cli --only chrome,gedit      # 只处理指定项目
 sudo ./install.sh --background                  # 选择后交给 systemd 后台运行
 ```
 
-`configs/all.json` 选择全部功能，包含显式系统升级。`configs/repair.json` 是一组常用修复选项。可用 `--config` 指定配置文件，再用 `--only` 指定想单独处理的功能。用 `--list` 查看当前平台的可用项和禁用原因，用 `--check --arch arm64` 或 `--dry-run --arch armhf` 预演其他架构。
+`configs/all.json` 选择全部功能，包含显式系统升级。`configs/repair.json` 是一组常用修复选项。可用 `--config` 指定配置文件，再用 `--only` 指定想单独处理的功能。用 `--list` 查看当前平台的可用项和禁用原因。用 `./install.sh --dry-run --cli --config configs/all.json --suite focal --arch armhf` 预演 Ubuntu 20.04 ARM32，版本代号可选 `focal`、`jammy`、`noble`、`resolute`。
 
 ## 功能清单
 
 | 功能 | `--only` 取值 | 内容 |
 |---|---|---|
 | 基础工具、编辑、归档 | `base_tools`、`gedit`、`media_tools` | Git、curl、Python、Vim、编译工具、gedit、ZIP 和 RAR 工具 |
-| 开发与图形界面 | `dev_tools`、`desktop_tools`、`clion` | CMake、Ninja、OpenCV、Eigen、ZBar、Aravis、Qt6 开发扩展、Qt Creator 和 JetBrains CLion |
+| 开发与图形界面 | `dev_tools`、`desktop_tools`、`clion` | CMake、Ninja、OpenCV、Eigen、ZBar、Aravis、Qt 开发扩展、Qt Creator 和 JetBrains CLion |
 | 中文环境 | `language_input` | 简体中文界面、英文标准目录。登录、虚拟终端和 GNOME 新窗口默认美式英语，可切换中文 |
 | 双系统与磁盘 | `time_sync`、`storage_tools` | Chrony 国内校时和 Windows 本地硬件时钟；NTFS、exFAT、UDisks 工具，外置盘按桌面文件管理器流程挂载 |
-| NVIDIA 与 CUDA | `gpu_driver`、`cuda` | Ubuntu 推荐驱动和仓库中的 CUDA 工具链。适用于 amd64，驱动按硬件检测 |
-| ROS | `ros`、`rosdep` | 对应 Ubuntu LTS 的 ROS 桌面和国内依赖索引。支持 amd64、arm64 |
+| NVIDIA、CUDA 和推理 | `gpu_driver`、`cuda`、`tensorrt` | Ubuntu 推荐驱动按硬件检测。CUDA 和 TensorRT 支持 amd64、ARM64 SBSA |
+| ROS | `ros`、`rosdep` | 对应 Ubuntu LTS 的 ROS 桌面和国内依赖索引，ARM32 的桌面包提供到 Ubuntu 20.04 Noetic |
 | 浏览器和编辑器 | `chrome`、`edge`、`vscode` | Google Chrome 稳定版、Microsoft Edge、VS Code |
 | 通讯与文档 | `qq`、`wechat`、`typora` | 腾讯 QQ、微信、Typora |
 | 其他应用 | `v2rayn`、`anaconda`、`spark_store`、`hikcamera` | v2rayN、Anaconda、星火应用商店、海康机器人 MVS 客户端和 SDK |
-| Windows 兼容与游戏 | `virtualization_tools`、`steam` | Wine、Steam 安装器及其 i386 依赖，两项均适用于 amd64 |
+| Windows 兼容与游戏 | `virtualization_tools`、`steam` | 原生架构的 Wine，以及适用于 amd64 的 Steam 安装器和 i386 依赖 |
 | 系统维护 | `system_upgrade` | 显式执行已安装软件的 APT 升级 |
 
-ROS 映射为 Ubuntu 20.04 → Noetic、22.04 → Humble、24.04 → Jazzy、26.04 → Lyrical。Chrome、QQ、Typora、Anaconda、星火商店和 MVS 支持 amd64、arm64，Edge 和微信的安装流程支持 amd64。v2rayN 可复用匹配架构的已有程序。Ubuntu 24.04、26.04 的 Edge、VS Code 和 v2rayN 可从山东大学星火镜像补装，其他适用版本可提供本地包。MVS 配置 USB 相机访问，PCIe 采集卡驱动按具体板卡配置。
+ROS 映射为 Ubuntu 20.04 → Noetic、22.04 → Humble、24.04 → Jazzy、26.04 → Lyrical。rosdep 支持三种架构。Chrome、QQ、微信、Typora、Anaconda、星火商店和 MVS 提供 amd64 和 arm64 包。国内镜像的 Edge 包为 amd64，VS Code 包为 amd64 和 arm64。可为 VS Code 提供匹配架构的本地 deb。v2rayN 可复用匹配架构的已有程序，Ubuntu 24.04、26.04 也可从山东大学星火镜像补装，Ubuntu 20.04、22.04 可提供兼容的本地包。MVS 配置 USB 相机访问，PCIe 采集卡驱动按具体板卡配置。
 
 中文输入法默认优先 IBus 的 libpinyin、pinyin 或 Rime，确认系统引擎不可用时尝试搜狗。用 `--input-method ibus` 或 `--input-method sogou` 可指定后端。IBus 用 **Super+空格** 或 **Ctrl+空格** 切换，搜狗可用 **Ctrl+空格**。应用级设置在注销重登后生效。搜狗/Fcitx4 的原生 Wayland 和 GTK4 兼容性有限。
 
@@ -43,7 +43,9 @@ Chrome、Edge、VS Code 和 v2rayN 使用山东大学星火镜像，校验索引
 
 普通运行会跳过已经就绪的功能。`--reinstall` 重检或修复现有配置。`--clean-reinstall` 需配合 `--only`，先验证替换包和卸载依赖，再重装已配置的独立应用，例如 Chrome 或 QQ。下载缓存支持断点续传。旧版安装器留下的固定磁盘挂载配置可用 `sudo ./install.sh --cli --only storage_tools` 清理。
 
-运行 `sudo ./install.sh --cli --only desktop_tools` 安装 Qt6 基础开发工具、Qt Creator 和包名以 `-dev` 结尾的官方扩展。扩展列表根据 Ubuntu 22.04、24.04 或 26.04 的国内 APT 索引和本机架构生成，所需运行库由 APT 安装。已有 Qt6 环境会补齐缺少的开发包，已安装的扩展可用 `sudo ./manage.sh check-updates --only desktop_tools` 检查更新。
+运行 `sudo ./install.sh --cli --only desktop_tools` 安装 Qt 基础开发工具、Qt Creator 和包名以 `-dev` 结尾的官方扩展。Ubuntu 20.04 使用 Qt5，22.04、24.04 和 26.04 使用 Qt6。国内 APT 索引和本机架构决定扩展列表，所需运行库由 APT 安装。已安装的扩展可用 `sudo ./manage.sh check-updates --only desktop_tools` 检查更新。Ubuntu 20.04 的 exFAT 支持使用仓库中的 `exfat-utils` 和 `exfat-fuse`，已安装 `exfatprogs` 的系统可直接使用它。
+
+运行 `sudo ./install.sh --cli --only tensorrt` 安装 TensorRT C++ 开发库、Python 绑定、ONNX 解析器、`trtexec` 和匹配的 CUDA 运行库。支持 amd64 和 ARM64 SBSA 的四个 Ubuntu LTS，软件包通过 NVIDIA 中国签名 APT 仓库直连获取。Ubuntu 20.04 ARM64 SBSA 的 CUDA 工具链也从此仓库获取。Jetson 使用与板卡匹配的 JetPack。GPU 推理需要与 CUDA 和 TensorRT 配套的驱动及显卡。使用 `sudo ./manage.sh check-updates --only tensorrt` 检查版本更新。
 
 CLion 使用 JetBrains 的统一安装包，个人学习、开源和其他非商业用途可在应用中选择免费授权。运行 `sudo ./install.sh --cli --only clion`，安装器优先复用 `packages.local/` 中匹配架构的原始归档。自动下载要求 JetBrains 官方入口将请求分配到中国 CDN，完成后用官方 SHA-256 校验。单独下载到 `packages.local/` 可运行 `python3 -B scripts/lib/archive_apps.py "$(dpkg --print-architecture)" --download-clion`。[JetBrains 中国站](https://www.jetbrains.com.cn/clion/)
 

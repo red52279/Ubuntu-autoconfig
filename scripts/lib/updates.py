@@ -10,8 +10,9 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
+import tensorrt
 from archive_apps import CLION_PATH, anaconda_latest, clion_archive, clion_latest, clion_version, newer
-from catalog import FEATURES, ROS, support
+from catalog import FEATURES, LOCAL_DEB_PACKAGES, ROS, qt_base_packages, spark_package_available, storage_packages, support
 from desktop_locale import write_file
 from journal import Journal, ROOT, STATE, copy_path, fingerprint, packages
 from network import check_url
@@ -32,7 +33,8 @@ EXTRAS = {
                        'fcitx-ui-classic', 'fcitx-config-gtk', 'im-config', 'locales', 'language-pack-zh-hans',
                        'language-pack-gnome-zh-hans', 'language-pack-gnome-zh-hans-base',
                        'language-selector-gnome', 'fonts-noto-cjk'),
-    'cuda': ('nvidia-cuda-dev', 'nvidia-cuda-gdb'),
+    'cuda': ('nvidia-cuda-dev', 'nvidia-cuda-gdb', 'cuda-toolkit'),
+    'virtualization_tools': ('wine64', 'wine32'),
     'rosdep': ('ros-dev-tools', 'python3-rosdep-modules', 'python3-rosdistro', 'python3-rosdistro-modules'),
     'steam': ('steam', 'steam-libs', 'steam-libs-i386'),
     'hikcamera': ('libxcb-xinerama0', 'libusb-1.0-0', 'libxkbcommon-x11-0', 'net-tools'),
@@ -114,7 +116,15 @@ def installed_targets(feature, installed, suite):
         wanted.update(name.split(':')[0] for name in installed
                       if re.match(r'^(?:nvidia-|libnvidia-|linux-(?:modules|objects|signatures)-nvidia-)', name))
     if feature == 'desktop_tools':
-        wanted.update(name.split(':')[0] for name in installed_qt_dev_packages())
+        wanted.update(qt_base_packages(suite))
+        wanted.update(name.split(':')[0] for name in installed_qt_dev_packages(suite))
+    if feature == 'storage_tools':
+        wanted.update(storage_packages(suite))
+    if feature == 'tensorrt':
+        wanted.update(name.split(':')[0] for name in installed if tensorrt.is_package(name))
+        for name, version in installed.items():
+            if name.split(':')[0] == 'libnvinfer-bin':
+                wanted.update(tensorrt.runtime_packages(version))
     return {name for name in installed if name.split(':')[0] in wanted}
 
 
@@ -215,9 +225,16 @@ def scan(selected, installed, arch, suite, work):
         installed_name = next((name for name in names if name.split(':')[0] == package), None)
         try:
             if installed_name:
-                version, file = vendor_candidate(feature, package, arch, work)
-                if newer(version, installed[installed_name]):
-                    available.append((installed_name, version, str(file)))
+                local = ROOT / 'packages.local' / f'{package}_{arch}.deb'
+                if (feature in LOCAL_DEB_PACKAGES and not spark_package_available(feature, arch, suite)
+                        and not local.is_file()):
+                    if not available:
+                        print(f'{feature}: 可提供兼容本机系统的 {local.name} 检查更新', flush=True)
+                        continue
+                else:
+                    version, file = vendor_candidate(feature, package, arch, work)
+                    if newer(version, installed[installed_name]):
+                        available.append((installed_name, version, str(file)))
             if feature in ARCHIVES:
                 current, version, source = archive_versions(feature, arch)
                 if current and newer(version, current):
@@ -282,7 +299,8 @@ def save_previous_debs(receipt, planned, installed, work):
     for name in sorted(wanted - retained.keys()):
         with tempfile.TemporaryDirectory(dir=work) as temp:
             try:
-                apt('download', f'{name}={installed[name]}', capture=True, cwd=temp, timeout=60)
+                timeout = None if tensorrt.is_package(name) else 60
+                apt('download', f'{name}={installed[name]}', capture=True, cwd=temp, timeout=timeout)
             except subprocess.CalledProcessError:
                 continue
             for path in Path(temp).glob('*.deb'):
@@ -294,14 +312,22 @@ def save_previous_debs(receipt, planned, installed, work):
 
 
 def apply_package_updates(receipt, changes, arch, work):
-    args = ['install', '--no-remove', '--no-install-recommends', *(value[1] for value in changes.values())]
-    simulation = apt('-s', *args, capture=True)
     before = receipt.data['packages_before']
+    args = ['install', '--no-remove', '--no-install-recommends', *(value[1] for value in changes.values())]
+    for name, (version, _) in changes.items():
+        if name.split(':')[0] == 'libnvinfer-bin':
+            named = {package.split(':')[0] for package in before.keys() | changes.keys()}
+            args.extend(package for package in tensorrt.runtime_packages(version) if package not in named)
+            break
+    simulation = apt('-s', *args, capture=True)
     planned = planned_installs(simulation, before, arch)
     if any(planned.get(name) != spec[0] for name, spec in changes.items()):
         raise ValueError('APT 求解结果与选定更新版本不一致')
     save_previous_debs(receipt, planned, before, work)
-    apt('--download-only', '-y', *args, timeout=300)
+    # A single TensorRT runtime package can exceed 1 GiB. Keep APT's
+    # connection and idle timeouts without a five-minute transfer limit.
+    timeout = None if any(map(tensorrt.is_package, planned)) else 300
+    apt('--download-only', '-y', *args, timeout=timeout)
     receipt.prepare('apt_update_versions')
     try:
         apt_apply(args)
@@ -393,7 +419,8 @@ def rollback_versions(receipt, execute, work, arch):
             if name not in allowed or allowed[name] is not None:
                 raise ValueError(f'回退会卸载计划外的软件包 {name}')
         if execute:
-            apt('--download-only', '-y', *args, timeout=300)
+            timeout = None if any(map(tensorrt.is_package, allowed)) else 300
+            apt('--download-only', '-y', *args, timeout=timeout)
             apt_apply(args)
             restored = packages()
             if any(restored.get(name) != version for name, version in allowed.items()):
@@ -433,8 +460,11 @@ def execute(args, work):
         if name not in FEATURES:
             raise ValueError(f'未知功能 {name}')
     supported = []
+    jetson = arch == 'arm64' and tensorrt.is_jetson()
     for name in selected:
         ok, reason = support(name, arch, suite)
+        if ok and jetson and name in tensorrt.NVIDIA_FEATURES:
+            ok, reason = False, tensorrt.JETPACK_REASON
         if ok:
             supported.append(name)
         else:

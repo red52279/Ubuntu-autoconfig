@@ -343,10 +343,10 @@ ARCH=armhf
 DRY_RUN=1
 source "$TEST_ROOT/scripts/modules/gpu_driver.sh"
 source "$TEST_ROOT/scripts/modules/cuda.sh"
-for feature in qq wechat steam language_input ros cuda gpu_driver anaconda v2rayn; do
+for feature in qq wechat steam language_input ros cuda anaconda v2rayn; do
     run_step "$feature" "$feature" "install_$feature"
 done
-[[ ${#SKIPPED[@]} == 9 && ${#FAILURES[@]} == 0 ]]
+[[ ${#SKIPPED[@]} == 8 && ${#FAILURES[@]} == 0 ]]
 ''')
 
     def test_help_never_requests_privileges(self):

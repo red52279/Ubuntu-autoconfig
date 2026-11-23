@@ -13,6 +13,7 @@
     "time_sync": "Y",
     "gpu_driver": "N",
     "cuda": "N",
+    "tensorrt": "N",
     "ros": "N",
     "rosdep": "Y",
     "v2rayn": "Y",

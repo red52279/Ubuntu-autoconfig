@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 import pwd
 import subprocess
-from catalog import FEATURES, LOCAL_DEB_PACKAGES, ROS, support
+import tensorrt
+from catalog import FEATURES, LOCAL_DEB_PACKAGES, feature_packages, qt_base_packages, spark_package_available, support
 from archive_apps import CLION_PATH, clion_version, v2rayn_desktop_ready
 from qt_packages import available_qt_packages
 from vendor_release import managed_typora_source
@@ -72,14 +73,19 @@ class Inventory:
     def __init__(self, arch=None, suite=None, user=None, input_method='auto', packages=None):
         self.host_arch = output(['dpkg', '--print-architecture'])
         self.arch = arch or self.host_arch
-        self.suite = suite or dict(line.split('=',1) for line in read('/etc/os-release').splitlines() if '=' in line).get('VERSION_CODENAME','').strip('"')
+        os_release = dict(line.split('=', 1) for line in read('/etc/os-release').splitlines() if '=' in line)
+        self.host_suite = os_release.get('VERSION_CODENAME', '').strip('"') or output(['lsb_release', '-sc'])
+        self.suite = suite or self.host_suite
         self.user = user or os.environ.get('SUDO_USER') or pwd.getpwuid(int(os.environ.get('PKEXEC_UID',os.getuid()))).pw_name
         self.home = Path(pwd.getpwnam(self.user).pw_dir)
         self.method = input_method
-        if packages is None:
+        if packages is not None:
+            self.packages = packages
+        elif self.arch == self.host_arch and self.suite == self.host_suite:
             rows = output(['dpkg-query','-W','-f=${binary:Package}\t${Version}\t${db:Status-Status}\n']).splitlines()
             self.packages = {row.split('\t')[0]: row.split('\t')[1] for row in rows if row.endswith('\tinstalled')}
-        else: self.packages = packages
+        else:
+            self.packages = {}
 
     def installed(self, package):
         return package in self.packages or package + ':' + self.arch in self.packages
@@ -91,7 +97,7 @@ class Inventory:
 
     def result(self, name, status, reason, packages=None):
         return dict(feature=name, label=FEATURES[name]['label'], status=status, reason=reason,
-                    packages=packages if packages is not None else FEATURES[name]['packages'],
+                    packages=packages if packages is not None else list(feature_packages(name, self.arch, self.suite)),
                     clean_reinstall=bool(FEATURES[name]['clean']))
 
     def vendor_deb_status(self, name):
@@ -99,7 +105,7 @@ class Inventory:
         relative = Path('packages.local') / filename
         if (ROOT / relative).is_file():
             return self.result(name, 'missing', f'将安装本地包 {relative}')
-        if self.arch in ('amd64', 'arm64') and self.suite in ('noble', 'resolute'):
+        if spark_package_available(name, self.arch, self.suite):
             return self.result(name, 'missing', '将从山大星火签名镜像下载')
         return self.result(name, 'disabled', f'当前无已验证的国内下载源，可提供 {relative}')
 
@@ -107,8 +113,10 @@ class Inventory:
         spec = FEATURES[name]
         supported, why = support(name,self.arch,self.suite,self.method)
         if not supported: return self.result(name,'disabled',why)
-        if self.arch != self.host_arch:
+        if self.arch != self.host_arch or self.suite != self.host_suite:
             return self.result(name,'unknown','仅验证目标平台支持范围；安装包和配置需在目标机器检测')
+        if self.arch == 'arm64' and name in tensorrt.NVIDIA_FEATURES and tensorrt.is_jetson():
+            return self.result(name, 'disabled', tensorrt.JETPACK_REASON)
         if name == 'anaconda' and not Path('/opt/anaconda3/bin/python').exists():
             return self.result(name,'missing','尚未安装 Anaconda')
         if name == 'clion' and not clion_version(CLION_PATH):
@@ -120,18 +128,20 @@ class Inventory:
         if name == 'hikcamera' and binary_arch('/opt/MVS/bin/MVS') != self.arch:
             return self.result(name,'missing','缺少匹配架构的 MVS 客户端')
         if name == 'desktop_tools':
+            base = qt_base_packages(self.suite)[0]
             try:
-                packages = available_qt_packages(self.arch)
+                packages = available_qt_packages(self.arch, self.suite)
             except (OSError, subprocess.SubprocessError):
-                return self.result(name, 'unknown', '刷新 APT 索引后检查 Qt6 开发包')
-            if 'qt6-base-dev' not in packages:
-                return self.result(name, 'unknown', '刷新 APT 索引后检查 Qt6 开发包')
+                return self.result(name, 'unknown', '刷新 APT 索引后检查 Qt 开发包')
+            if base not in packages:
+                return self.result(name, 'unknown', '刷新 APT 索引后检查 Qt 开发包')
             missing = [package for package in packages if not self.installed(package)]
             if missing:
-                return self.result(name, 'missing', f'缺少 {len(missing)} 个 Qt6 开发环境软件包，例如 ' + ', '.join(missing[:5]), packages)
-            return self.result(name, 'ready', 'Qt6 开发扩展和工具已就绪', packages)
-        packages = list(spec['packages'])
-        if name == 'ros': packages = ['ros-' + ROS[self.suite] + '-desktop']
+                return self.result(name, 'missing', f'缺少 {len(missing)} 个 Qt 开发环境软件包，例如 ' + ', '.join(missing[:5]), packages)
+            return self.result(name, 'ready', 'Qt 开发扩展和工具已就绪', packages)
+        packages = list(feature_packages(name, self.arch, self.suite))
+        if name == 'storage_tools' and self.installed('exfatprogs'):
+            packages = ['ntfs-3g', 'exfatprogs', 'udisks2']
         if name == 'ros' and self.suite == 'focal' and self.installed('ros-noetic-desktop-full'):
             packages = ['ros-noetic-desktop-full']
         if name == 'language_input':
@@ -152,6 +162,14 @@ class Inventory:
         return self.result(name,'ready' if ready else 'configure',reason,packages)
 
     def configuration(self, name):
+        if name == 'tensorrt':
+            version = self.packages.get('libnvinfer-bin', self.packages.get(f'libnvinfer-bin:{self.arch}', ''))
+            missing = [package for package in tensorrt.runtime_packages(version) if not self.installed(package)]
+            if missing:
+                return False, '缺少配套 CUDA 运行库: ' + ', '.join(missing)
+            ready = (read(tensorrt.SOURCE).strip() == tensorrt.source_line(self.suite, self.arch)
+                     and Path(tensorrt.keyring(self.suite)).is_file() and Path(tensorrt.PREFERENCES).is_file())
+            return ready, f'TensorRT {version} 已安装' if ready else '需配置 NVIDIA 中国签名仓库'
         if name == 'clion':
             return (os.access(CLION_PATH / 'bin/clion.sh', os.X_OK)
                     and Path('/usr/share/applications/jetbrains-clion.desktop').is_file()), '检查 CLion 和桌面入口'
@@ -235,7 +253,9 @@ class Inventory:
                     and (self.home / '.ros/rosdep/sources.cache/index').exists()),'检查 rosdep 国内源与用户缓存'
         if name == 'gpu_driver':
             if output(['nvidia-smi','--query-gpu=driver_version','--format=csv,noheader']): return True,'现有 NVIDIA 驱动正常'
-            recommended = output(['ubuntu-drivers','devices'],timeout=20)
+            devices = output(['ubuntu-drivers','devices'],timeout=20)
+            recommended = any(line.startswith('driver') and 'nvidia-driver-' in line and 'recommended' in line
+                              for line in devices.splitlines())
             if not recommended: return True,'未检测到需要本模块安装的专用驱动'
             return False,'需检查推荐显卡驱动'
         if name == 'v2rayn':

@@ -53,12 +53,16 @@ install_signing_key() (
     tmp_dir=$(mktemp -d)
     trap 'rm -rf -- "$tmp_dir"' EXIT
     download_from_mirrors "$tmp_dir/key.asc" "$@"
-    actual=$(gpg --batch --homedir "$tmp_dir" --show-keys --with-colons "$tmp_dir/key.asc" |
-        awk -F: '$1 == "pub" { primary=1 } $1 == "fpr" && primary { print $10; primary=0 }')
+    actual=$(signing_key_fingerprints "$tmp_dir" "$tmp_dir/key.asc")
     [[ "$actual" == "$fingerprint" ]] || die "APT 签名公钥指纹不匹配: $key"
     gpg --batch --homedir "$tmp_dir" --dearmor -o "$tmp_dir/key.gpg" "$tmp_dir/key.asc"
     as_root install -m 0644 "$tmp_dir/key.gpg" "$key"
 )
+
+signing_key_fingerprints() {
+    gpg --batch --homedir "$1" --show-keys --with-colons "$2" |
+        awk -F: '$1 == "pub" { primary=1 } $1 == "fpr" && primary { print $10; primary=0 }'
+}
 
 select_domestic_mirror() {
     if (( DRY_RUN )); then
@@ -89,7 +93,7 @@ apt_get() {
         network_tool audit-apt || return $?
     fi
     for host in mirrors.tuna.tsinghua.edu.cn mirrors.ustc.edu.cn mirrors.nju.edu.cn mirrors.aliyun.com \
-        mirrors.huaweicloud.com typoraio.cn downloads.typoraio.cn; do
+        mirrors.huaweicloud.com typoraio.cn downloads.typoraio.cn developer.download.nvidia.cn; do
         proxy_options+=(-o "Acquire::http::Proxy::$host=DIRECT" -o "Acquire::https::Proxy::$host=DIRECT")
     done
     if [[ -n ${APT_FETCH_TIMEOUT:-} ]]; then deadline=(timeout --foreground --kill-after=10s "${APT_FETCH_TIMEOUT}s"); fi

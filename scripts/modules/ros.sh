@@ -12,8 +12,8 @@ ros_distro_for_system() {
 }
 
 install_ros() {
-    if [[ "$ARCH" == armhf ]]; then
-        warn "ROS 官方仓库不为 armhf 提供完整桌面包，跳过 ROS 安装。"
+    if [[ "$ARCH" == armhf && "$UBUNTU_CODENAME" != focal ]]; then
+        warn "该版 ROS 2 的国内源未发布 armhf 桌面包。"
         return "$SKIP_STATUS"
     fi
     local distro
@@ -26,7 +26,7 @@ install_ros() {
     configure_ros_source "$distro"
     APT_UPDATED=1
     local ros_pkg="ros-${distro}-desktop"
-    if [[ "$distro" == noetic ]]; then
+    if [[ "$distro" == noetic && "$ARCH" != armhf ]]; then
         if (( DRY_RUN )) || apt_has_candidate "ros-${distro}-desktop-full"; then
             ros_pkg="ros-${distro}-desktop-full"
         fi

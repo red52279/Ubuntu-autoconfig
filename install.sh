@@ -21,6 +21,7 @@ RESET_STATE=0
 LIST_ONLY=0
 CHECK_ONLY=0
 ARCH_OVERRIDE=
+SUITE_OVERRIDE=
 CLEAN_REINSTALL=0
 NO_REBOOT=1
 NO_REBOOT_EXPLICIT=0
@@ -55,6 +56,7 @@ usage() {
   --list              列出当前平台的功能及禁用原因
   --check             只检测实际安装/配置状态，可非 root 运行
   --arch ARCH         与 --check/--list/--dry-run 配合检查 amd64/arm64/armhf
+  --suite SUITE       与 --check/--list/--dry-run 配合检查 focal/jammy/noble/resolute
   --dry-run           只显示动作，不修改系统（可非 root 运行）
   --no-reboot         完成后不重启（默认行为）
   --background        选好功能后交给 systemd 后台运行，终端关闭不影响任务
@@ -79,6 +81,7 @@ while (($#)); do
         --list) LIST_ONLY=1; shift ;;
         --check) CHECK_ONLY=1; shift ;;
         --arch) ARCH_OVERRIDE=${2:?--arch 需要架构}; shift 2 ;;
+        --suite) SUITE_OVERRIDE=${2:?--suite 需要 Ubuntu 代号}; shift 2 ;;
         --clean-reinstall) CLEAN_REINSTALL=1; REINSTALL=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --no-reboot) NO_REBOOT=1; NO_REBOOT_EXPLICIT=1; shift ;;
@@ -110,6 +113,10 @@ fi
 if [[ -n "$ARCH_OVERRIDE" ]]; then
     case "$ARCH_OVERRIDE" in amd64|arm64|armhf) ;; *) die "无效目标架构: $ARCH_OVERRIDE" ;; esac
     (( DRY_RUN || CHECK_ONLY || LIST_ONLY )) || die "--arch 仅用于检测或预演；实际安装自动检测本机架构。"
+fi
+if [[ -n "$SUITE_OVERRIDE" ]]; then
+    case "$SUITE_OVERRIDE" in focal|jammy|noble|resolute) ;; *) die "无效目标 Ubuntu 代号: $SUITE_OVERRIDE" ;; esac
+    (( DRY_RUN || CHECK_ONLY || LIST_ONLY )) || die "--suite 仅用于检测或预演；实际安装自动检测本机版本。"
 fi
 if (( CLEAN_REINSTALL )); then
     [[ -n "$ONLY_FEATURES" ]] || die "卸载后重装必须用 --only 明确指定独立应用。"
@@ -230,7 +237,7 @@ configure_domestic_sources() {
     shopt -s nullglob
     for source_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
         case "$(basename "$source_file")" in
-            ros2.list|typora.list|ubuntu-autoconfig-chromium.list)
+            ros2.list|typora.list|ubuntu-autoconfig-chromium.list|ubuntu-autoconfig-tensorrt.list)
                 if network_tool audit-apt "$source_file" >/dev/null 2>&1; then continue; fi ;;
         esac
         as_root mv "$source_file" "$backup/$(basename "$source_file").disabled"
@@ -410,7 +417,7 @@ ensure_domestic_sources() {
 
 main() {
     detect_system
-    local module feature needed=0
+    local module feature needed=0 supported_selected=0
     for module in "$SCRIPT_DIR"/scripts/modules/*.sh; do source "$module"; done
     select_features
     refresh_inventory
@@ -443,10 +450,12 @@ PYCONFIG
     fi
     for feature in "${FEATURES[@]}"; do
         [[ "${ENABLED[$feature]:-0}" == 1 ]] || continue
-        if [[ "${DETECTED[$feature]}" != ready && "${DETECTED[$feature]}" != disabled ]] || (( REINSTALL || CLEAN_REINSTALL )); then needed=1; fi
+        [[ "${DETECTED[$feature]}" != disabled ]] || continue
+        supported_selected=1
+        if [[ "${DETECTED[$feature]}" != ready ]] || (( REINSTALL || CLEAN_REINSTALL )); then needed=1; fi
     done
     [[ "$ONLY_FEATURES" != sources ]] || needed=1
-    if (( ! DRY_RUN )) && ! network_tool audit-apt >/dev/null 2>&1; then needed=1; fi
+    if (( ! DRY_RUN && supported_selected )) && ! network_tool audit-apt >/dev/null 2>&1; then needed=1; fi
     if (( ! needed && RESET_STATE && ! DRY_RUN )); then
         rm -f "$STATE_DIR/state" "$STATE_DIR/failed-step"
         say "已清除断点标记；实际已就绪的软件仍不会重复安装。"

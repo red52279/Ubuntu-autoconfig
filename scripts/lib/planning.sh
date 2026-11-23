@@ -112,10 +112,15 @@ detect_system() {
         UBUNTU_CODENAME=$(lsb_release -sc)
     fi
     [ -n "$UBUNTU_CODENAME" ] || die "无法获取 Ubuntu 代号（如 focal/jammy/noble）。"
+    UBUNTU_CODENAME=${SUITE_OVERRIDE:-$UBUNTU_CODENAME}
     ARCH=${ARCH_OVERRIDE:-$(dpkg --print-architecture)}
     case "$ARCH" in amd64|arm64|armhf) ;; *) die "支持 amd64、arm64、armhf，当前架构为 $ARCH。" ;; esac
     export UBUNTU_CODENAME ARCH
-    say "系统: Ubuntu ${VERSION_ID} ($UBUNTU_CODENAME), 架构: $ARCH ($(architecture_name))"
+    if [[ -n ${SUITE_OVERRIDE:-} ]]; then
+        say "检测目标: Ubuntu $UBUNTU_CODENAME, 架构: $ARCH ($(architecture_name))"
+    else
+        say "系统: Ubuntu ${VERSION_ID} ($UBUNTU_CODENAME), 架构: $ARCH ($(architecture_name))"
+    fi
 }
 
 

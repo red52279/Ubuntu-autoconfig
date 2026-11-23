@@ -12,8 +12,12 @@ import subprocess
 import tempfile
 import time
 
+import tensorrt
+
 ROOT = Path(__file__).resolve().parents[2]
 STATE = Path('/var/lib/ubuntu-autoconfig')
+NVIDIA_REPO_PATHS = [tensorrt.SOURCE, tensorrt.PREFERENCES,
+                     *dict.fromkeys(tensorrt.keyring(suite) for suite in tensorrt.RELEASES)]
 PATHS = {
     'sources': ['/etc/apt/sources.list', '/etc/apt/sources.list.d'],
     'language_input': ['/etc/default/locale', '/etc/default/keyboard', '/etc/console-setup',
@@ -32,6 +36,8 @@ PATHS = {
     'vscode': ['/etc/apt/sources.list.d/vscode.sources', '/etc/apt/sources.list.d/vscode.list',
                '/usr/share/keyrings/microsoft.gpg', '/etc/apt/trusted.gpg.d/microsoft.gpg'],
     'typora': ['/etc/apt/sources.list.d/typora.list', '/usr/share/keyrings/typora-archive-keyring.gpg'],
+    'tensorrt': NVIDIA_REPO_PATHS,
+    'cuda': NVIDIA_REPO_PATHS,
     'anaconda': ['/etc/conda/.condarc', '/etc/profile.d/anaconda.sh'],
     'v2rayn': ['/opt/v2rayN', '/usr/share/applications/v2rayn.desktop'],
     'spark_store': ['/etc/apt/sources.list.d/sparkstore.list', '/etc/apt/trusted.gpg.d/spark-store.gpg'],

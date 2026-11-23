@@ -165,17 +165,23 @@ install_qq() (
 )
 
 wechat_release_urls() {
+    local platform
+    case "$ARCH" in
+        amd64) platform=x86_64 ;;
+        arm64) platform=arm64 ;;
+        *) return "$SKIP_STATUS" ;;
+    esac
     if [[ -n ${WECHAT_OFFICIAL_URL:-} ]]; then
         printf '%s\n' "$WECHAT_OFFICIAL_URL"
     else
-        printf '%s\n' https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb \
-            https://dldir1.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb
+        printf '%s\n' "https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_${platform}.deb" \
+            "https://dldir1.qq.com/weixin/Universal/Linux/WeChatLinux_${platform}.deb"
     fi
 }
 
 install_wechat() {
-    if [[ "$ARCH" != amd64 ]]; then
-        warn "腾讯微信官方 Linux 包目前仅提供 amd64，当前为 $ARCH，跳过。"
+    if [[ "$ARCH" != amd64 && "$ARCH" != arm64 ]]; then
+        warn "腾讯微信官方 Linux 包提供 amd64 和 arm64，当前为 $ARCH。"
         return "$SKIP_STATUS"
     fi
     if (( ! DRY_RUN && ! ${CLEAN_REINSTALL:-0} )) && has_pkg wechat; then

@@ -108,6 +108,18 @@ class ArchiveTests(unittest.TestCase):
 
 
 class VersionTests(unittest.TestCase):
+    def test_update_check_skips_incompatible_mirror_builds(self):
+        for feature, package, arch, suite in (
+                ('v2rayn', 'v2rayn', 'arm64', 'focal'),
+                ('vscode', 'code', 'armhf', 'noble')):
+            with self.subTest(feature=feature), temporary_directory() as work, \
+                    patch.object(updates, 'ROOT', Path(work)), \
+                    patch.object(updates, 'package_candidates', return_value={}), \
+                    patch.object(updates, 'vendor_candidate') as vendor:
+                self.assertEqual(updates.scan([feature], {package: '1'}, arch, suite, Path(work)),
+                                 ({}, {}, []))
+                vendor.assert_not_called()
+
     def test_typora_uses_latest_signed_package_and_recognizes_only_legacy_source(self):
         with temporary_directory() as directory:
             root = Path(directory)
@@ -154,6 +166,20 @@ class VersionTests(unittest.TestCase):
         with patch('qt_packages.subprocess.check_output', return_value=rows):
             targets = updates.installed_targets('desktop_tools', installed, 'resolute')
         self.assertEqual(targets, {'qt6-base-dev', 'qtcreator', 'qt6-multimedia-dev:amd64'})
+
+    def test_tensorrt_update_adds_the_cuda_runtime_for_a_new_variant(self):
+        previous = '11.4.0.106-1+cuda13.4'
+        selected = '11.5.0.63-1+cuda13.5'
+        before = {'libnvinfer-bin': previous, 'cuda-cudart-13-4': '13.4', 'libcublas-13-4': '13.4'}
+        self.assertEqual(updates.installed_targets('tensorrt', before, 'resolute'), set(before))
+        changes = {'libnvinfer-bin': (selected, f'libnvinfer-bin={selected}')}
+        receipt = SimpleNamespace(data={'packages_before': before, 'packages_after': {'libnvinfer-bin': selected}},
+                                  prepare=lambda _: None, checkpoint=lambda *_: None)
+        with temporary_directory() as work, patch.object(
+                updates, 'apt', return_value=f'Inst libnvinfer-bin [{previous}] ({selected} NVIDIA [amd64])'), \
+                patch.object(updates, 'apt_apply') as apply, patch.object(updates, 'save_previous_debs'):
+            updates.apply_package_updates(receipt, changes, 'amd64', Path(work))
+        self.assertEqual(apply.call_args.args[0][-2:], ['cuda-cudart-13-5', 'libcublas-13-5'])
 
     def test_rollback_refuses_solver_changes_outside_the_record(self):
         receipt = SimpleNamespace(data={'version_update': True, 'packages_before': {'gedit': '1'},

@@ -11,30 +11,42 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / 'scripts/lib'
 sys.path.insert(0,str(LIB))
-from catalog import FEATURES, support
+from catalog import FEATURES, feature_packages, support
 from preflight import Inventory, binary_arch
 from qt_packages import qt_packages_from_index
 from summary import render
+import tensorrt
 
 
 class ArchitectureTests(unittest.TestCase):
     def test_arm64_enables_native_apps_and_disables_x86_paths(self):
-        for name in ('base_tools','language_input','storage_tools','ros','qq','anaconda','chrome'):
+        for name in ('base_tools','language_input','storage_tools','ros','qq','anaconda','chrome',
+                     'wechat','virtualization_tools','gpu_driver','cuda','tensorrt'):
             self.assertTrue(support(name,'arm64','resolute')[0],name)
-        for name in ('steam','wechat','virtualization_tools','gpu_driver','cuda','edge'):
+        for name in ('steam','edge'):
             self.assertFalse(support(name,'arm64','resolute')[0],name)
 
     def test_armhf_disables_vendor_binaries_but_keeps_native_input(self):
-        for name in ('qq','wechat','typora','anaconda','ros','rosdep','steam','cuda','chrome'):
+        for name in ('qq','wechat','typora','anaconda','ros','steam','cuda','chrome'):
             self.assertFalse(support(name,'armhf','jammy')[0],name)
+        for name in ('rosdep','virtualization_tools','desktop_tools'):
+            self.assertTrue(support(name,'armhf','jammy')[0],name)
         self.assertTrue(support('language_input','armhf','jammy','auto')[0])
         self.assertFalse(support('language_input','armhf','jammy','sogou')[0])
 
     def test_lts_release_constraints_are_explicit(self):
         for suite in ('focal','jammy','noble','resolute'):
             self.assertTrue(support('ros','arm64',suite)[0])
+            self.assertTrue(support('tensorrt','amd64',suite)[0])
+        self.assertTrue(support('ros','armhf','focal')[0])
         self.assertFalse(support('ros','arm64','plucky')[0])
-        self.assertFalse(support('desktop_tools','amd64','focal')[0])
+        self.assertTrue(support('desktop_tools','amd64','focal')[0])
+        self.assertEqual(feature_packages('desktop_tools','armhf','focal')[0], 'qtbase5-dev')
+        self.assertEqual(feature_packages('storage_tools','arm64','focal'),
+                         ('ntfs-3g', 'exfat-utils', 'exfat-fuse', 'udisks2'))
+        self.assertEqual(feature_packages('virtualization_tools','armhf','focal'), ('wine', 'wine32'))
+        self.assertEqual(feature_packages('cuda','arm64','focal'), ('cuda-toolkit',))
+        self.assertIn('/ubuntu2004/sbsa/', tensorrt.source_line('focal', 'arm64'))
 
     def test_vendor_binary_architecture_is_checked_from_elf(self):
         with temporary_directory() as tmp:
@@ -56,7 +68,9 @@ class ArchitectureTests(unittest.TestCase):
 class InventoryTests(unittest.TestCase):
     def inventory(self, packages, arch='amd64'):
         with patch('preflight.output',return_value='amd64'):
-            return Inventory(arch=arch,suite='resolute',packages=packages)
+            inventory = Inventory(arch=arch,suite='resolute',packages=packages)
+        inventory.host_suite = 'resolute'
+        return inventory
 
     def test_installed_software_is_ready_without_state_file(self):
         inventory=self.inventory({'linuxqq':'3.2.35'})
@@ -68,7 +82,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(inventory.inspect('qq')['status'],'missing')
 
     def test_qualified_native_package_names_count_as_installed(self):
-        inventory=self.inventory({'wine:amd64':'10'})
+        inventory=self.inventory({'wine:amd64':'10', 'wine64:amd64':'10'})
         self.assertEqual(inventory.inspect('virtualization_tools')['status'],'ready')
 
     def test_qt_index_selects_only_official_dev_extensions_and_base_tools(self):
@@ -121,6 +135,15 @@ Homepage: https://wiki.qt.io/Qt_for_Python"""
         self.assertEqual(qt_packages_from_index(index.splitlines(keepends=True), 'amd64'),
                          ['libpyside6-dev', 'qt6-base-dev', 'qt6-base-doc-dev', 'qt6-tools-dev-tools', 'qtcreator'])
 
+    def test_focal_selects_qt5_development_extensions(self):
+        index = ('Package: qtbase5-dev\nArchitecture: armhf\n\n'
+                 'Package: qt5-qmake\nSource: qtbase-opensource-src\nArchitecture: armhf\n'
+                 'Homepage: https://www.qt.io/developers/\n\n'
+                 'Package: libqt5svg5-dev\nSource: qtsvg-opensource-src\nArchitecture: armhf\n'
+                 'Homepage: https://www.qt.io/developers/\n')
+        self.assertEqual(qt_packages_from_index(index.splitlines(keepends=True), 'armhf', 'focal'),
+                         ['libqt5svg5-dev', 'qtbase5-dev'])
+
     def test_qt_base_installation_needs_missing_extensions(self):
         inventory = self.inventory({'qt6-base-dev': '6.10.2', 'qt6-tools-dev-tools': '6.10.2',
                                     'qtcreator': '18.0.2'})
@@ -135,7 +158,39 @@ Homepage: https://wiki.qt.io/Qt_for_Python"""
     def test_cross_arch_check_does_not_reuse_host_installed_binaries(self):
         inventory=self.inventory({'linuxqq':'3.2.35'},arch='arm64')
         self.assertEqual(inventory.inspect('qq')['status'],'unknown')
-        self.assertEqual(inventory.inspect('cuda')['status'],'disabled')
+        self.assertEqual(inventory.inspect('steam')['status'],'disabled')
+
+    def test_cross_release_check_does_not_reuse_host_installed_binaries(self):
+        inventory = self.inventory({'linuxqq': '3.2.35'})
+        inventory.suite = 'focal'
+        self.assertEqual(inventory.inspect('qq')['status'], 'unknown')
+
+    def test_jetson_keeps_its_board_specific_nvidia_stack(self):
+        inventory = self.inventory({}, arch='arm64')
+        inventory.host_arch = 'arm64'
+        with patch('tensorrt.is_jetson', return_value=True):
+            for feature in ('gpu_driver', 'cuda', 'tensorrt'):
+                result = inventory.inspect(feature)
+                self.assertEqual(result['status'], 'disabled')
+                self.assertIn('JetPack', result['reason'])
+            self.assertEqual(inventory.inspect('wechat')['status'], 'missing')
+
+    def test_tensorrt_preflight_requires_configured_repo_and_matching_cuda_runtime(self):
+        version = '11.5.0.63-1+cuda13.5'
+        inventory = self.inventory(dict.fromkeys(tensorrt.PACKAGES, version))
+        inventory.packages['cuda-cudart-13-4'] = '13.4'
+        result = inventory.inspect('tensorrt')
+        self.assertEqual(result['status'], 'configure')
+        self.assertIn('cuda-cudart-13-5', result['reason'])
+        inventory.packages.update(dict.fromkeys(tensorrt.runtime_packages(version), '13.5'))
+        with temporary_directory() as work, patch.multiple(
+                tensorrt, SOURCE=str(Path(work) / 'tensorrt.list'),
+                KEY_PREFIX=str(Path(work) / 'tensorrt'), PREFERENCES=str(Path(work) / 'tensorrt.pref')):
+            self.assertEqual(inventory.inspect('tensorrt')['status'], 'configure')
+            Path(tensorrt.SOURCE).write_text(tensorrt.source_line('resolute') + '\n')
+            Path(tensorrt.keyring('resolute')).touch()
+            Path(tensorrt.PREFERENCES).touch()
+            self.assertEqual(inventory.inspect('tensorrt')['status'], 'ready')
 
     def test_package_exists_but_configuration_missing_requires_repair(self):
         packages={'chrony':'4'}
@@ -161,8 +216,9 @@ Homepage: https://wiki.qt.io/Qt_for_Python"""
             self.assertEqual(inventory.inspect('edge')['status'], 'missing')
             self.assertEqual(inventory.inspect('vscode')['status'], 'missing')
             inventory.suite = 'jammy'
-            self.assertEqual(inventory.inspect('edge')['status'], 'disabled')
-            self.assertEqual(inventory.inspect('vscode')['status'], 'disabled')
+            inventory.host_suite = 'jammy'
+            self.assertEqual(inventory.inspect('edge')['status'], 'missing')
+            self.assertEqual(inventory.inspect('vscode')['status'], 'missing')
             folder = Path(tmp) / 'packages.local'
             folder.mkdir()
             (folder / 'code_amd64.deb').touch()
@@ -199,13 +255,14 @@ class CliPlatformTests(unittest.TestCase):
                                   cwd=ROOT, env={**os.environ, 'XDG_STATE_HOME': state})
 
     def test_legacy_chromium_cli_and_configs_select_chrome(self):
-        result = self.command('--dry-run', '--cli', '--only', 'chromium', '--clean-reinstall')
+        target = ('--dry-run', '--cli', '--arch', 'amd64', '--suite', 'resolute')
+        result = self.command(*target, '--only', 'chromium', '--clean-reinstall')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('Google Chrome 官方稳定版', result.stdout)
         with temporary_directory() as directory:
             config = Path(directory) / 'legacy.json'
             config.write_text(json.dumps({'features': {'chromium': 'Y', 'base_tools': 'N', 'language_input': 'N'}}))
-            result = self.command('--dry-run', '--cli', '--config', str(config))
+            result = self.command(*target, '--config', str(config))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('Google Chrome 官方稳定版', result.stdout)
 
@@ -220,6 +277,15 @@ class CliPlatformTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertIn('实际安装自动检测',result.stderr)
 
+    def test_target_release_override_is_preview_only(self):
+        result = self.command('--suite','focal','--cli')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('实际安装自动检测本机版本',result.stderr)
+        result = self.command('--suite','focal','--arch','armhf','--list')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('检测目标: Ubuntu focal',result.stdout)
+        self.assertRegex(result.stdout, r'(?m)^ros[ \t]+(?:待目标机检测|未安装|已就绪|需配置)')
+
     def test_clean_reinstall_requires_explicit_safe_app(self):
         for arguments in [('--clean-reinstall','--dry-run'),('--clean-reinstall','--only','base_tools','--dry-run')]:
             result=self.command(*arguments)
@@ -233,7 +299,7 @@ class CliPlatformTests(unittest.TestCase):
         self.assertIn('已禁用',result.stdout)
 
     def test_only_accepts_catalog_feature_with_a_digit(self):
-        result = self.command('--dry-run', '--cli', '--only', 'v2rayn')
+        result = self.command('--dry-run', '--cli', '--arch', 'amd64', '--only', 'v2rayn')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('v2rayN', result.stdout)
 
