@@ -5,7 +5,7 @@ import sys
 import tarfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from run_files import temporary_directory
 
@@ -15,6 +15,36 @@ import updates
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_clion_download_requires_matching_chinese_cdn_and_leaves_apt_policy_unchanged(self):
+        import network
+        url = 'https://download.jetbrains.com/cpp/CLion-2026.3.0.1.tar.gz'
+        with self.assertRaises(ValueError):
+            network.check_url(url)
+        with patch.object(archive_apps, 'open_direct') as request:
+            archive_apps.open_clion_download(url)
+            checks = request.call_args.kwargs
+            checks['request_check'](url)
+            checks['redirect_check'](
+                url.replace('download.jetbrains.com', 'download-cdn.clf.jetbrains.com.cn') + '?Signature=test')
+            for invalid in (url, url.replace('download.jetbrains.com', 'download-cdn.jetbrains.com'),
+                            'https://download-cdn.clf.jetbrains.com.cn/cpp/CLion-2026.3.2.tar.gz'):
+                with self.assertRaises(ValueError):
+                    checks['redirect_check'](invalid)
+
+    def test_clion_install_downloads_the_pinned_version_when_no_local_archive_exists(self):
+        with temporary_directory() as directory:
+            root = Path(directory)
+            destination = root / 'clion'
+            with patch.object(archive_apps, 'download_clion') as fetch, \
+                    patch.object(archive_apps, 'unpack_clion') as unpack, \
+                    patch.object(archive_apps, 'clion_latest') as latest, \
+                    patch.object(archive_apps.tempfile, 'tempdir', str(root)):
+                archive_apps.install_clion('amd64', destination, root, version='2026.3.0.1')
+                fetch.assert_called_once_with('amd64', '2026.3.0.1', ANY, ANY)
+                self.assertEqual(fetch.call_args.args[2].name, 'CLion-2026.3.0.1.tar.gz')
+                unpack.assert_called_once_with('amd64', destination, '2026.3.0.1', fetch.call_args.args[2])
+                latest.assert_not_called()
+
     def test_clion_installs_matching_original_archive_and_preserves_previous_on_error(self):
         with temporary_directory() as directory:
             root = Path(directory)

@@ -9,7 +9,7 @@ from pathlib import Path
 import pwd
 import subprocess
 from catalog import FEATURES, LOCAL_DEB_PACKAGES, ROS, support
-from archive_apps import CLION_PATH, clion_archive, clion_version, v2rayn_desktop_ready
+from archive_apps import CLION_PATH, clion_version, v2rayn_desktop_ready
 from input_config import (ENGLISH_IBUS_ENGINE, ENGLISH_LAYOUT, FCITX_ENGLISH, FCITX_PROGRAM,
                           GNOME_SOURCES, LOGIN_COMMAND, LOGIN_TARGET, LOGIN_UNIT,
                           keyboard_layouts, read_ini)
@@ -110,11 +110,7 @@ class Inventory:
         if name == 'anaconda' and not Path('/opt/anaconda3/bin/python').exists():
             return self.result(name,'missing','尚未安装 Anaconda')
         if name == 'clion' and not clion_version(CLION_PATH):
-            try:
-                clion_archive(self.arch)
-            except ValueError as exc:
-                return self.result(name, 'disabled', str(exc))
-            return self.result(name, 'missing', '使用 packages.local 中的 JetBrains Linux 安装包')
+            return self.result(name, 'missing', '使用本地安装包或 JetBrains 官方中国 CDN')
         if name == 'v2rayn' and binary_arch('/opt/v2rayN/v2rayN') != self.arch:
             if os.environ.get('V2RAYN_DOMESTIC_URLS'):
                 return self.result(name, 'missing', '将使用指定的国内镜像')

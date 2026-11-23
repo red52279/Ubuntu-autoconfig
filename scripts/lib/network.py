@@ -73,13 +73,17 @@ def check_url(url):
 
 
 class DomesticRedirect(HTTPRedirectHandler):
+    def __init__(self, redirect_check=None):
+        self.redirect_check = redirect_check
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        check_url(newurl)
+        (self.redirect_check or check_url)(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def open_direct(url, sample=False, offset=0, validator=None, data=None, request_headers=None):
-    check_url(url)
+def open_direct(url, sample=False, offset=0, validator=None, data=None, request_headers=None,
+                *, request_check=None, redirect_check=None):
+    (request_check or check_url)(url)
     headers = {'User-Agent': 'ubuntu-autoconfig/3.0', 'Accept-Encoding': 'identity'}
     if urlsplit(url).hostname == 'www.hikrobotics.com':
         headers['Referer'] = 'https://www.hikrobotics.com/cn/machinevision/service/download/'
@@ -92,14 +96,18 @@ def open_direct(url, sample=False, offset=0, validator=None, data=None, request_
             headers['If-Range'] = validator
     # Explicitly ignore http(s)_proxy, ALL_PROXY, desktop and system proxy
     # discovery. Each redirect is checked before making the next request.
-    opener = build_opener(ProxyHandler({}), DomesticRedirect())
+    opener = build_opener(ProxyHandler({}), DomesticRedirect(redirect_check))
     response = opener.open(Request(url, headers=headers, data=data), timeout=12 if sample else 30)
-    check_url(response.geturl())
+    try:
+        (redirect_check or check_url)(response.geturl())
+    except ValueError:
+        response.close()
+        raise
     return response
 
 
 def validate(data, kind, content_type=''):
-    signatures = {'deb': b'!<arch>\n', 'zip': b'PK\x03\x04', 'sh': b'#!',
+    signatures = {'deb': b'!<arch>\n', 'zip': b'PK\x03\x04', 'sh': b'#!', 'gzip': b'\x1f\x8b',
                   'xz': b'\xfd7zXZ\x00', 'key': b'-----BEGIN PGP PUBLIC KEY BLOCK-----'}
     if not data:
         raise ValueError('服务器返回空文件')
@@ -110,11 +118,11 @@ def validate(data, kind, content_type=''):
         raise ValueError('服务器返回 HTML 页面而非安装文件')
 
 
-def probe(url, kind):
+def probe(url, kind, *, opener=None):
     start = time.monotonic()
     result = {'url': url, 'ok': False, 'direct': True}
     try:
-        with open_direct(url, sample=True) as response:
+        with (opener or open_direct)(url, sample=True) as response:
             data = response.read(SAMPLE_BYTES)
             validate(data, kind, response.headers.get('Content-Type', ''))
             elapsed = time.monotonic() - start
@@ -154,7 +162,7 @@ def save_metadata(path, data):
     temp.replace(path)
 
 
-def download(url, output, kind, cache=None, expected=None):
+def download(url, output, kind, cache=None, expected=None, *, opener=None, expected_sha256=None):
     output = Path(output)
     identity = resource_identity(url)
     if cache:
@@ -178,6 +186,7 @@ def download(url, output, kind, cache=None, expected=None):
         stored_identity = metadata.get('identity', metadata.get('url'))
         if (complete.exists() and stored_identity == identity and current_validator
                 and current_validator == metadata.get('validator')
+                and (expected_sha256 is None or metadata.get('sha256') == expected_sha256)
                 and metadata.get('sha256') == file_sha256(complete)):
             shutil.copyfile(complete, output)
             return
@@ -187,7 +196,7 @@ def download(url, output, kind, cache=None, expected=None):
         offset = partial.stat().st_size if partial.exists() and validator else 0
         if offset:
             print(f'[断点续传] 从 {offset} bytes 继续: {public_url(url)}', file=sys.stderr)
-        with open_direct(url, offset=offset, validator=validator) as response:
+        with (opener or open_direct)(url, offset=offset, validator=validator) as response:
             append = response.status == 206 and offset > 0
             if response.status not in (200, 206):
                 raise ValueError(f'下载响应错误: {response.status}')
@@ -233,6 +242,10 @@ def download(url, output, kind, cache=None, expected=None):
             if expected_size is not None and total != expected_size:
                 raise ValueError(f'下载不完整: {total}/{expected_size} bytes，已保留断点')
         metadata['sha256'] = file_sha256(partial)
+        if expected_sha256 and metadata['sha256'] != expected_sha256:
+            partial.unlink(missing_ok=True)
+            metadata_file.unlink(missing_ok=True)
+            raise ValueError('安装包与官方 SHA-256 不一致，已丢弃错误下载')
         if cache:
             partial.replace(complete)
             save_metadata(metadata_file, metadata)

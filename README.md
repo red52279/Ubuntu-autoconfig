@@ -43,7 +43,7 @@ Chrome、Edge、VS Code 和 v2rayN 使用山东大学星火镜像，校验索引
 
 普通运行会跳过已经就绪的功能。`--reinstall` 重检或修复现有配置。`--clean-reinstall` 需配合 `--only`，先验证替换包和卸载依赖，再重装已配置的独立应用，例如 Chrome 或 QQ。下载缓存支持断点续传。旧版安装器留下的固定磁盘挂载配置可用 `sudo ./install.sh --cli --only storage_tools` 清理。
 
-CLion 使用 JetBrains 的统一安装包，个人学习、开源和其他非商业用途可在应用中选择免费授权。将下载的原始 Linux 稳定版归档放入 `packages.local/`，例如 `CLion-2026.3.0.1.tar.gz` 或 ARM64 的 `CLion-2026.3.0.1-aarch64.tar.gz`，再运行 `sudo ./install.sh --cli --only clion`。[JetBrains 中国站](https://www.jetbrains.com.cn/clion/)
+CLion 使用 JetBrains 的统一安装包，个人学习、开源和其他非商业用途可在应用中选择免费授权。运行 `sudo ./install.sh --cli --only clion`，安装器优先复用 `packages.local/` 中匹配架构的原始归档。自动下载要求 JetBrains 官方入口将请求分配到中国 CDN，完成后用官方 SHA-256 校验。单独下载到 `packages.local/` 可运行 `python3 -B scripts/lib/archive_apps.py "$(dpkg --print-architecture)" --download-clion`。[JetBrains 中国站](https://www.jetbrains.com.cn/clion/)
 
 本机已有 v2rayN 时，安装器复用现有程序及可用的原启动器。只需修复桌面入口时，可运行 `sudo /usr/bin/python3 -B scripts/lib/archive_apps.py "$(dpkg --print-architecture)" --configure-v2rayn`。
 
@@ -58,7 +58,7 @@ sudo ./manage.sh rollback-version --yes
 sudo ./manage.sh rollback-version --run 运行ID --yes
 ```
 
-检查会用国内白名单源刷新 APT 索引并比较已安装功能的版本，系统原有源配置保留。通过 deb 安装的独立应用按现有国内下载渠道或本地包检查，部分厂商需要读取下载包才提供版本信息，结果可复用下载缓存。`update` 在应用前也会检查版本。全量更新覆盖本机已安装的功能，整机软件包升级可显式指定 `--only system_upgrade`。CLion 从 JetBrains 中国站检测版本，新版本的归档放入 `packages.local/` 后由更新命令安装。
+检查会用国内白名单源刷新 APT 索引并比较已安装功能的版本，系统原有源配置保留。通过 deb 安装的独立应用按现有国内下载渠道或本地包检查，部分厂商需要读取下载包才提供版本信息，结果可复用下载缓存。`update` 在应用前也会检查版本。全量更新覆盖本机已安装的功能，整机软件包升级可显式指定 `--only system_upgrade`。CLion 从 JetBrains 中国站检测版本，并按检查到的版本下载或复用安装包。
 
 每次实际更新都会记录版本和涉及的配置。APT 旧包能从缓存或签名镜像取得时会保存，CLion、MVS 和脚本管理的 Anaconda 会记录旧安装目录。回退按整次更新记录执行，先检查现有版本和依赖，确认后使用 `--yes`。旧版本若已撤下且无备份则无法回退。其他渠道安装且无法识别版本的程序会显示检查原因。
 

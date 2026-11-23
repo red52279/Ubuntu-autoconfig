@@ -1,5 +1,8 @@
 """Version and archive handling for applications installed under /opt."""
 import argparse
+from contextlib import ExitStack
+import fcntl
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
@@ -9,14 +12,19 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
+from urllib.parse import urlsplit
 
-from network import file_sha256, open_direct
+from network import download, file_sha256, open_direct, probe, public_url
 from desktop_locale import write_file
 
 ROOT = Path(__file__).resolve().parents[2]
 CLION_PATH = Path('/opt/clion')
 ANACONDA_ARCHIVE = 'https://mirrors.nju.edu.cn/anaconda/archive/'
 MACHINE = {'amd64': 'x86_64', 'arm64': 'aarch64'}
+CLION_VERSION = r'[0-9]+(?:\.[0-9]+){1,3}'
+CLION_ORIGIN = 'download.jetbrains.com'
+CLION_CHINA_CDN = 'download-cdn.clf.jetbrains.com.cn'
 DESKTOP_DIR = Path('/usr/share/applications')
 V2RAYN_DESKTOP = """[Desktop Entry]
 Name=v2rayN
@@ -79,14 +87,14 @@ def clion_version(directory):
         return None
 
 
-def clion_archive(arch, package_dir=None):
+def clion_archive(arch, package_dir=None, version=None):
     package_dir = package_dir or ROOT / 'packages.local'
     suffix = r'(?:-x86_64|-amd64)?' if arch == 'amd64' else r'(?:-aarch64|-arm64)'
-    pattern = re.compile(r'clion-([0-9]+(?:\.[0-9]+)+)' + suffix + r'\.tar\.gz', re.I)
+    pattern = re.compile(rf'clion-({CLION_VERSION})' + suffix + r'\.tar\.gz', re.I)
     releases = []
     for path in package_dir.iterdir() if package_dir.is_dir() else ():
         match = pattern.fullmatch(path.name)
-        if match and path.is_file():
+        if match and (version is None or version == match[1]) and path.is_file():
             releases.append((tuple(map(int, match[1].split('.'))), match[1], path))
     if not releases:
         raise ValueError(f'请将 JetBrains CLion 稳定版 Linux {arch} 的原始 tar.gz 放入 packages.local/')
@@ -103,8 +111,93 @@ def clion_latest():
     return max((release.decode() for release in releases), key=lambda x: tuple(map(int, x.split('.'))))
 
 
-def install_clion(arch, directory=CLION_PATH, package_dir=None):
-    version, archive = clion_archive(arch, package_dir)
+def clion_filename(arch, version):
+    if not re.fullmatch(CLION_VERSION, version):
+        raise ValueError('无效的 CLion 稳定版版本号')
+    suffix = '-aarch64' if arch == 'arm64' else ''
+    return f'CLion-{version}{suffix}.tar.gz'
+
+
+def open_clion_download(url, **kwargs):
+    path = urlsplit(url).path
+    checksum = path.endswith('.sha256')
+
+    def check(target, hosts):
+        parts = urlsplit(target)
+        if (parts.scheme != 'https' or parts.hostname not in hosts or parts.path != path
+                or parts.username or parts.password or parts.port not in (None, 443)):
+            raise ValueError(f'CLion 响应未指向同一安装包的官方中国 CDN: {public_url(target)}')
+
+    if not re.fullmatch(rf'/cpp/CLion-{CLION_VERSION}(?:-aarch64)?\.tar\.gz(?:\.sha256)?', path):
+        raise ValueError('无效的 CLion 官方安装包路径')
+    hosts = (CLION_CHINA_CDN, CLION_ORIGIN) if checksum else (CLION_CHINA_CDN,)
+    return open_direct(url, request_check=lambda target: check(target, (CLION_ORIGIN,)),
+                       redirect_check=lambda target: check(target, hosts), **kwargs)
+
+
+def clion_checksum(arch, version):
+    filename = clion_filename(arch, version)
+    with open_clion_download(f'https://{CLION_ORIGIN}/cpp/{filename}.sha256') as response:
+        fields = response.read(4096).decode('ascii').split()
+    if not fields or not re.fullmatch(r'[a-fA-F0-9]{64}', fields[0]):
+        raise ValueError('JetBrains 未返回有效的 SHA-256')
+    if len(fields) > 1 and fields[1].lstrip('*') != filename:
+        raise ValueError('JetBrains 校验文件对应的安装包名称不匹配')
+    return fields[0].lower()
+
+
+def download_clion(arch, version, output, cache=None):
+    digest = clion_checksum(arch, version)
+    if output.is_file() and file_sha256(output) == digest:
+        return digest
+    url = f'https://{CLION_ORIGIN}/cpp/{clion_filename(arch, version)}'
+    sample = probe(url, 'gzip', opener=open_clion_download)
+    if not sample['ok']:
+        raise ValueError(f"CLion 安装包直连失败: {sample['error']}")
+    print(f'[直连下载] {clion_filename(arch, version)}（JetBrains 中国 CDN）', flush=True)
+    for attempt in range(3):
+        try:
+            download(url, output, 'gzip', cache, sample, opener=open_clion_download, expected_sha256=digest)
+            return digest
+        except (OSError, ValueError, HTTPException):
+            if attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
+
+
+def save_clion_download(arch, version):
+    filename = clion_filename(arch, version)
+    target = ROOT / 'packages.local' / filename
+    work = ROOT / 'runs' / 'clion-downloads'
+    work.mkdir(parents=True, exist_ok=True)
+    with (work / (filename + '.publish.lock')).open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if target.exists():
+            digest = clion_checksum(arch, version)
+            if file_sha256(target) != digest:
+                raise ValueError(f'现有 {target.name} 校验不一致，请移开该文件后重试')
+        else:
+            staged = work / filename
+            digest = download_clion(arch, version, staged)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            staged.replace(target)
+        write_file(target.with_name(filename + '.sha256'), f'{digest} *{filename}\n')
+    return target
+
+
+def install_clion(arch, directory=CLION_PATH, package_dir=None, version=None):
+    with ExitStack() as resources:
+        try:
+            selected, archive = clion_archive(arch, package_dir, version)
+        except ValueError:
+            selected = version or clion_latest()
+            work = Path(resources.enter_context(tempfile.TemporaryDirectory(prefix='clion-download.')))
+            archive = work / clion_filename(arch, selected)
+            download_clion(arch, selected, archive, os.environ.get('AUTOCONFIG_CACHE_DIR'))
+        unpack_clion(arch, directory, selected, archive)
+
+
+def unpack_clion(arch, directory, version, archive):
     if directory.exists() and not clion_version(directory):
         raise ValueError(f'{directory} 已存在且无法识别为 CLion 安装目录')
     if directory.is_symlink():
@@ -166,11 +259,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('arch', choices=MACHINE)
     parser.add_argument('--configure-v2rayn', action='store_true')
+    parser.add_argument('--download-clion', action='store_true', help='下载并校验 CLion，保存到 packages.local/')
+    parser.add_argument('--version', help='指定 CLion 稳定版')
     try:
         arguments = parser.parse_args()
         if arguments.configure_v2rayn:
             configure_v2rayn_desktop()
+        elif arguments.download_clion:
+            print(save_clion_download(arguments.arch, arguments.version or clion_latest()))
         else:
-            install_clion(arguments.arch)
-    except (OSError, ValueError, tarfile.TarError, subprocess.SubprocessError) as exc:
+            install_clion(arguments.arch, version=arguments.version)
+    except (OSError, ValueError, HTTPException, tarfile.TarError, subprocess.SubprocessError) as exc:
         parser.exit(1, f'{exc}\n')

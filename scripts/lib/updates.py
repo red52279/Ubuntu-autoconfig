@@ -171,7 +171,8 @@ def archive_versions(feature, arch):
                 return current, version, version
         except ValueError:
             pass
-        return current, clion_latest(), None
+        version = clion_latest()
+        return current, version, version
     if feature == 'hikcamera':
         match = re.search(r'^Version:\s*(\d+(?:\.\d+)+)', (path / 'ReleaseNote_EN.txt').read_text(errors='replace'), re.M)
         if not match:
@@ -214,9 +215,8 @@ def scan(selected, installed, arch, suite, work):
             if feature in ARCHIVES:
                 current, version, source = archive_versions(feature, arch)
                 if current and newer(version, current):
-                    print(f'{feature}: {current} → {version}' + ('（需提供本地安装包）' if not source else ''), flush=True)
-                    if source:
-                        archives[feature] = source
+                    print(f'{feature}: {current} → {version}', flush=True)
+                    archives[feature] = source
                 else:
                     print(f'{feature}: ' + (f'已是当前可用版本 {current}' if current else '尚未安装'), flush=True)
             if feature == 'v2rayn' and not names and Path('/opt/v2rayN/v2rayN').is_file():
@@ -306,13 +306,12 @@ def apply_package_updates(receipt, changes, arch, work):
 
 
 def apply_archive(receipt, feature, source, arch):
-    if feature == 'clion' and clion_archive(arch)[0] != source:
-        raise ValueError('CLion 本地安装包在检查后发生变化')
     receipt.prepare(feature)
     try:
         shell('SCRIPT_DIR=$1; ARCH=$2; UPDATE_ARCHIVE=1; '
               'if [[ $3 == anaconda ]]; then source "$SCRIPT_DIR/scripts/modules/official_apps.sh"; ANACONDA_VERSION=$4; '
-              'else source "$SCRIPT_DIR/scripts/modules/$3.sh"; MVS_RELEASE_URL=$4; fi; "install_$3"',
+              'else source "$SCRIPT_DIR/scripts/modules/$3.sh"; '
+              'if [[ $3 == clion ]]; then CLION_VERSION=$4; else MVS_RELEASE_URL=$4; fi; fi; "install_$3"',
               arch, feature, source)
     finally:
         receipt.checkpoint(feature, 'checked')

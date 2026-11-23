@@ -144,6 +144,16 @@ class NetworkTests(unittest.TestCase):
                 network.download('https://mirrors.nju.edu.cn/a', output, 'sh')
             self.assertEqual(output.read_bytes(), b'#!/bin/sh\n')
 
+    def test_download_rejects_wrong_official_checksum_before_replacing_output(self):
+        with temporary_directory() as tmp:
+            output = Path(tmp) / 'archive.tar.gz'
+            output.write_bytes(b'previous')
+            with patch.object(network, 'open_direct', return_value=Response(b'\x1f\x8barchive')):
+                with self.assertRaisesRegex(ValueError, 'SHA-256'):
+                    network.download('https://mirrors.nju.edu.cn/a', output, 'gzip', expected_sha256='0' * 64)
+            self.assertEqual(output.read_bytes(), b'previous')
+            self.assertFalse(Path(str(output) + '.part').exists())
+
     def test_faster_valid_mirror_ranks_first(self):
         def probe(url, kind):
             return dict(url=url, ok=True, bytes_per_second=100 if url.endswith('fast') else 10, seconds=1)
