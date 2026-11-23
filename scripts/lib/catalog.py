@@ -17,7 +17,7 @@ def feature(label, packages=(), arches=ALL, suites=(), clean=(), reason='', kind
 FEATURES = {
     'base_tools': feature('基础命令行工具', ('ca-certificates','curl','wget','gnupg','git','jq','unzip','zip','vim','tree','rsync','python3','python3-pip','python3-venv','build-essential','pkg-config')),
     'dev_tools': feature('CMake / OpenCV / Eigen 开发库', ('cmake','ninja-build','gcc','g++','make','libssl-dev','libeigen3-dev','libopencv-dev','libzbar-dev','libaravis-dev')),
-    'desktop_tools': feature('Qt6 / Qt Creator', ('qt6-base-dev','qt6-tools-dev-tools','qtcreator'), suites=('jammy','noble','resolute'), reason='该发行版的 Ubuntu 源不提供本模块需要的 Qt6'),
+    'desktop_tools': feature('Qt6 开发扩展 / Qt Creator', ('qt6-base-dev','qt6-tools-dev-tools','qtcreator'), suites=('jammy','noble','resolute'), reason='该发行版的 Ubuntu 源不提供本模块需要的 Qt6'),
     'gedit': feature('gedit 文本编辑器', ('gedit',)),
     'clion': feature('JetBrains CLion（非商业免费）', arches=('amd64','arm64'), kind='clion'),
     'media_tools': feature('压缩与归档工具', ('zip','unzip','unrar','tree')),

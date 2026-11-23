@@ -142,6 +142,19 @@ class VersionTests(unittest.TestCase):
                          {'libexample:amd64': '2', 'steam-libs:i386': '3'})
         self.assertEqual(updates.installed_targets('steam', installed, 'noble'), {'steam-libs:i386'})
 
+    def test_qt_version_targets_include_dev_extensions_and_base_tools(self):
+        installed = {'qt6-base-dev': '6.10.2', 'qtcreator': '18.0.2',
+                     'qt6-multimedia-dev:amd64': '6.10.2',
+                     'libqt6multimedia6:amd64': '6.10.2', 'qt6-style-kvantum': '1.1'}
+        rows = ('qt6-base-dev\tqt6-base\thttps://www.qt.io/developers/\tinstalled\n'
+                'qtcreator\tqtcreator\t\tinstalled\n'
+                'qt6-multimedia-dev:amd64\tqt6-multimedia\thttps://www.qt.io/developers/\tinstalled\n'
+                'libqt6multimedia6:amd64\tqt6-multimedia\thttps://www.qt.io/developers/\tinstalled\n'
+                'qt6-style-kvantum\tqt6-style-kvantum\thttps://github.com/tsujan/Kvantum\tinstalled\n')
+        with patch('qt_packages.subprocess.check_output', return_value=rows):
+            targets = updates.installed_targets('desktop_tools', installed, 'resolute')
+        self.assertEqual(targets, {'qt6-base-dev', 'qtcreator', 'qt6-multimedia-dev:amd64'})
+
     def test_rollback_refuses_solver_changes_outside_the_record(self):
         receipt = SimpleNamespace(data={'version_update': True, 'packages_before': {'gedit': '1'},
                                         'packages_after': {'gedit': '2'}},

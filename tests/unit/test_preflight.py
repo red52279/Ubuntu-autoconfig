@@ -13,6 +13,7 @@ LIB = ROOT / 'scripts/lib'
 sys.path.insert(0,str(LIB))
 from catalog import FEATURES, support
 from preflight import Inventory, binary_arch
+from qt_packages import qt_packages_from_index
 from summary import render
 
 
@@ -69,6 +70,67 @@ class InventoryTests(unittest.TestCase):
     def test_qualified_native_package_names_count_as_installed(self):
         inventory=self.inventory({'wine:amd64':'10'})
         self.assertEqual(inventory.inspect('virtualization_tools')['status'],'ready')
+
+    def test_qt_index_selects_only_official_dev_extensions_and_base_tools(self):
+        index = """Package: qt6-base-dev
+Source: qt6-base (6.10.2-1)
+Architecture: amd64
+Homepage: https://www.qt.io/developers/
+
+Package: qt6-base-dev-dbgsym
+Source: qt6-base
+Architecture: amd64
+Homepage: https://www.qt.io/developers/
+
+Package: qt6-base-doc
+Source: qt6-base
+Architecture: all
+Homepage: https://www.qt.io/developers/
+
+Package: qt6-base-doc-dev
+Source: qt6-base
+Architecture: all
+Homepage: https://www.qt.io/developers/
+
+Package: qml6-module-qtquick
+Source: qt6-declarative
+Architecture: amd64
+Homepage: https://www.qt.io/developers/
+
+Package: qt6-webengine-dev
+Source: qt6-webengine
+Architecture: arm64
+Homepage: https://www.qt.io/developers/
+
+Package: qt6-style-kvantum-dev
+Architecture: amd64
+Homepage: https://github.com/tsujan/Kvantum
+
+Package: qtcreator
+Architecture: amd64
+
+Package: qt6-tools-dev-tools
+Source: qt6-tools
+Architecture: amd64
+Homepage: https://www.qt.io/developers/
+
+Package: libpyside6-dev
+Source: pyside6
+Architecture: amd64
+Homepage: https://wiki.qt.io/Qt_for_Python"""
+        self.assertEqual(qt_packages_from_index(index.splitlines(keepends=True), 'amd64'),
+                         ['libpyside6-dev', 'qt6-base-dev', 'qt6-base-doc-dev', 'qt6-tools-dev-tools', 'qtcreator'])
+
+    def test_qt_base_installation_needs_missing_extensions(self):
+        inventory = self.inventory({'qt6-base-dev': '6.10.2', 'qt6-tools-dev-tools': '6.10.2',
+                                    'qtcreator': '18.0.2'})
+        available = [*inventory.packages, 'qt6-multimedia-dev']
+        with patch('preflight.available_qt_packages', return_value=available):
+            result = inventory.inspect('desktop_tools')
+            self.assertEqual(result['status'], 'missing')
+            self.assertIn('qt6-multimedia-dev', result['reason'])
+            inventory.packages['qt6-multimedia-dev'] = '6.10.2'
+            self.assertEqual(inventory.inspect('desktop_tools')['status'], 'ready')
 
     def test_cross_arch_check_does_not_reuse_host_installed_binaries(self):
         inventory=self.inventory({'linuxqq':'3.2.35'},arch='arm64')

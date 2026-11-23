@@ -15,6 +15,7 @@ from catalog import FEATURES, ROS, support
 from desktop_locale import write_file
 from journal import Journal, ROOT, STATE, copy_path, fingerprint, packages
 from network import check_url
+from qt_packages import installed_qt_dev_packages
 from vendor_release import hik_release, managed_typora_source
 
 DEB_APPS = {
@@ -26,7 +27,6 @@ ARCHIVES = {'clion': CLION_PATH, 'hikcamera': Path('/opt/MVS'), 'anaconda': Path
 EXTRAS = {
     'base_tools': ('apt-transport-https', 'software-properties-common', 'python3-setuptools'),
     'dev_tools': ('aravis-tools',),
-    'desktop_tools': ('libqt6core6', 'libqt6core6t64', 'libqt6widgets6', 'libxcb-cursor0'),
     'media_tools': ('rar',),
     'language_input': ('ibus', 'ibus-libpinyin', 'ibus-pinyin', 'ibus-rime', 'fcitx', 'fcitx-bin',
                        'fcitx-ui-classic', 'fcitx-config-gtk', 'im-config', 'locales', 'language-pack-zh-hans',
@@ -113,6 +113,8 @@ def installed_targets(feature, installed, suite):
     if feature == 'gpu_driver':
         wanted.update(name.split(':')[0] for name in installed
                       if re.match(r'^(?:nvidia-|libnvidia-|linux-(?:modules|objects|signatures)-nvidia-)', name))
+    if feature == 'desktop_tools':
+        wanted.update(name.split(':')[0] for name in installed_qt_dev_packages())
     return {name for name in installed if name.split(':')[0] in wanted}
 
 

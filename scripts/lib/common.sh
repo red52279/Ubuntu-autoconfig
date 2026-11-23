@@ -233,7 +233,7 @@ apt_install() {
     apt_update || return $?
     say "安装缺少的软件包: ${pending[*]}"
     local options=()
-    if (( ${CLEAN_REINSTALL:-0} )); then options+=(--no-remove); fi
+    if (( ${CLEAN_REINSTALL:-0} || ${APT_INSTALL_NO_REMOVE:-0} )); then options+=(--no-remove); fi
     apt_get install -y --no-install-recommends "${options[@]}" "${pending[@]}"
 }
 

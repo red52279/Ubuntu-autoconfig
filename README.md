@@ -20,7 +20,7 @@ sudo ./install.sh --background                  # 选择后交给 systemd 后台
 | 功能 | `--only` 取值 | 内容 |
 |---|---|---|
 | 基础工具、编辑、归档 | `base_tools`、`gedit`、`media_tools` | Git、curl、Python、Vim、编译工具、gedit、ZIP 和 RAR 工具 |
-| 开发与图形界面 | `dev_tools`、`desktop_tools`、`clion` | CMake、Ninja、OpenCV、Eigen、ZBar、Aravis、Qt6、Qt Creator 和 JetBrains CLion。Qt6 按 22.04、24.04、26.04 仓库提供情况安装 |
+| 开发与图形界面 | `dev_tools`、`desktop_tools`、`clion` | CMake、Ninja、OpenCV、Eigen、ZBar、Aravis、Qt6 开发扩展、Qt Creator 和 JetBrains CLion |
 | 中文环境 | `language_input` | 简体中文界面、英文标准目录。登录、虚拟终端和 GNOME 新窗口默认美式英语，可切换中文 |
 | 双系统与磁盘 | `time_sync`、`storage_tools` | Chrony 国内校时和 Windows 本地硬件时钟；NTFS、exFAT、UDisks 工具，外置盘按桌面文件管理器流程挂载 |
 | NVIDIA 与 CUDA | `gpu_driver`、`cuda` | Ubuntu 推荐驱动和仓库中的 CUDA 工具链。适用于 amd64，驱动按硬件检测 |
@@ -42,6 +42,8 @@ APT 和下载器直连国内镜像及厂商白名单。Ubuntu 镜像在清华、
 Chrome、Edge、VS Code 和 v2rayN 使用山东大学星火镜像，校验索引签名和包的 SHA-256。可信的本地包可放入 `packages.local/`，例如 `google-chrome-stable_amd64.deb`。星火商店直连 Gitee，QQ 和微信走腾讯的官方下载。Typora 从中国 CDN 下载并核对官方签名索引，首次重新运行 Typora 项会迁移旧版安装器创建的 APT 源，之后用 `manage.sh check-updates` 和 `manage.sh update` 检查与更新。旧命令 `--only chromium` 仍可选中 Chrome。
 
 普通运行会跳过已经就绪的功能。`--reinstall` 重检或修复现有配置。`--clean-reinstall` 需配合 `--only`，先验证替换包和卸载依赖，再重装已配置的独立应用，例如 Chrome 或 QQ。下载缓存支持断点续传。旧版安装器留下的固定磁盘挂载配置可用 `sudo ./install.sh --cli --only storage_tools` 清理。
+
+运行 `sudo ./install.sh --cli --only desktop_tools` 安装 Qt6 基础开发工具、Qt Creator 和包名以 `-dev` 结尾的官方扩展。扩展列表根据 Ubuntu 22.04、24.04 或 26.04 的国内 APT 索引和本机架构生成，所需运行库由 APT 安装。已有 Qt6 环境会补齐缺少的开发包，已安装的扩展可用 `sudo ./manage.sh check-updates --only desktop_tools` 检查更新。
 
 CLion 使用 JetBrains 的统一安装包，个人学习、开源和其他非商业用途可在应用中选择免费授权。运行 `sudo ./install.sh --cli --only clion`，安装器优先复用 `packages.local/` 中匹配架构的原始归档。自动下载要求 JetBrains 官方入口将请求分配到中国 CDN，完成后用官方 SHA-256 校验。单独下载到 `packages.local/` 可运行 `python3 -B scripts/lib/archive_apps.py "$(dpkg --print-architecture)" --download-clion`。[JetBrains 中国站](https://www.jetbrains.com.cn/clion/)
 

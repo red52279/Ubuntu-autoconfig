@@ -10,6 +10,7 @@ import pwd
 import subprocess
 from catalog import FEATURES, LOCAL_DEB_PACKAGES, ROS, support
 from archive_apps import CLION_PATH, clion_version, v2rayn_desktop_ready
+from qt_packages import available_qt_packages
 from vendor_release import managed_typora_source
 from input_config import (ENGLISH_IBUS_ENGINE, ENGLISH_LAYOUT, FCITX_ENGLISH, FCITX_PROGRAM,
                           GNOME_SOURCES, LOGIN_COMMAND, LOGIN_TARGET, LOGIN_UNIT,
@@ -118,6 +119,17 @@ class Inventory:
             return self.vendor_deb_status(name)
         if name == 'hikcamera' and binary_arch('/opt/MVS/bin/MVS') != self.arch:
             return self.result(name,'missing','缺少匹配架构的 MVS 客户端')
+        if name == 'desktop_tools':
+            try:
+                packages = available_qt_packages(self.arch)
+            except (OSError, subprocess.SubprocessError):
+                return self.result(name, 'unknown', '刷新 APT 索引后检查 Qt6 开发包')
+            if 'qt6-base-dev' not in packages:
+                return self.result(name, 'unknown', '刷新 APT 索引后检查 Qt6 开发包')
+            missing = [package for package in packages if not self.installed(package)]
+            if missing:
+                return self.result(name, 'missing', f'缺少 {len(missing)} 个 Qt6 开发环境软件包，例如 ' + ', '.join(missing[:5]), packages)
+            return self.result(name, 'ready', 'Qt6 开发扩展和工具已就绪', packages)
         packages = list(spec['packages'])
         if name == 'ros': packages = ['ros-' + ROS[self.suite] + '-desktop']
         if name == 'ros' and self.suite == 'focal' and self.installed('ros-noetic-desktop-full'):
